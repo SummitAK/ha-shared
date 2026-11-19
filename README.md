@@ -57,3 +57,8 @@ and the two sites' configurations are not identical.
 - Zooz switch breaker panel/circuit is recorded in each Smart Switch Suite automation,
   not in entity or device names.
 - No-load (REM/NL) switch entities are kept off dashboards.
+- **Areas are physical rooms only.** Software-only devices and integrations get no area.
+  Hub hardware (HA Green, ZWA-2, network gear) goes in the room it physically sits in.
+- **`System` label** (grey, `mdi:server`, same at both sites) marks infrastructure:
+  OS/Core/Supervisor/Host, Backup, apps, radio controllers, network gear,
+  Marketplace/HACS items and software integrations (AI, TTS, MCP, HomeKit bridge).
