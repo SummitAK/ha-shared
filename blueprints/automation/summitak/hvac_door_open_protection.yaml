@@ -1,0 +1,473 @@
+blueprint:
+  name: HVAC Door-Open Protection (Ecobee)
+  description: 'Stops the AC from cooling the outdoors. When any monitored door or
+    slider stays open too long, the compressor is turned off first (thermostat set
+    to Off with the fan left running), and if the door is still open after an additional
+    delay the fan coil unit (FCU) is turned off too (fan back to Auto).
+
+
+    **Start interlock:** the AC can never be started while any monitored door is open,
+    or has been closed for less than the restart delay. If the thermostat is turned
+    on in that window - from the thermostat, the Ecobee app or Home Assistant - it
+    is turned straight back off, and cooling then starts by itself once every door
+    has been closed for the full restart delay. A manual fan-on is reversed in the
+    same window, and during the FCU lockout stage.
+
+
+    **Timing (all adjustable below):**
+
+    - Compressor off after: minutes a door must stay open (default 2).
+
+    - FCU off after: ADDITIONAL minutes after the compressor-off point (default 3,
+    so 5 minutes total).
+
+    - Restart delay: minutes ALL doors must stay closed before cooling can start (default
+    2). Prevents short cycling.
+
+    Each timer can optionally be linked to an input_number helper (minutes) so it
+    can be changed from a dashboard. When a helper is linked, its value wins; the
+    number setting is the fallback if the helper is missing or unavailable. A change
+    takes effect from the next door event.
+
+
+    Two helper switches (input_boolean) record the lockout stages so it survives Home
+    Assistant restarts. Dedicate one pair of helpers to each automation instance.
+    Sensors that are unavailable are treated as closed so a dead battery cannot lock
+    the AC off.
+
+
+    **Version:** 0.4.0
+
+    '
+  domain: automation
+  source_url: https://github.com/SummitAK/ha-shared/blob/main/blueprints/automation/summitak/hvac_door_open_protection.yaml
+  homeassistant:
+    min_version: 2024.10.0
+  input:
+    devices:
+      name: Devices
+      icon: mdi:door-sliding
+      input:
+        climate_entity:
+          name: Thermostat
+          description: The Ecobee thermostat (climate entity) that controls the compressor
+            and fan coil unit.
+          selector:
+            entity:
+              domain:
+              - climate
+              multiple: false
+              reorder: false
+        door_sensors:
+          name: Door / slider contact sensors
+          description: Every contact sensor to monitor. Add sensors here as more are
+            installed. Each sensor's ON state must mean open.
+          selector:
+            entity:
+              domain:
+              - binary_sensor
+              multiple: true
+              reorder: false
+        pause_flag:
+          name: Compressor lockout flag helper
+          description: An input_boolean that is ON while the AC is locked out because
+            of an open door.
+          selector:
+            entity:
+              domain:
+              - input_boolean
+              multiple: false
+              reorder: false
+        fcu_flag:
+          name: FCU lockout flag helper
+          description: An input_boolean that is ON once the fan coil unit has also
+            been locked out (second stage).
+          selector:
+            entity:
+              domain:
+              - input_boolean
+              multiple: false
+              reorder: false
+    timing:
+      name: Timing
+      icon: mdi:timer-cog
+      input:
+        compressor_off_delay:
+          name: Compressor off after door open (minutes)
+          description: How long any door must stay open before the compressor is turned
+            off. Fallback if no helper is linked below.
+          default: 2
+          selector:
+            number:
+              min: 0.0
+              max: 60.0
+              step: 0.5
+              mode: box
+              unit_of_measurement: min
+        compressor_off_delay_entity:
+          name: Compressor off delay - helper (optional)
+          description: input_number (minutes) that overrides the number above, for
+            dashboard adjustment.
+          default: ''
+          selector:
+            entity:
+              domain:
+              - input_number
+              multiple: false
+              reorder: false
+        fcu_off_extra_delay:
+          name: FCU off - additional minutes
+          description: Additional minutes AFTER the compressor-off point before the
+            fan coil unit is also turned off. Default 3 gives 5 minutes total. Fallback
+            if no helper is linked below.
+          default: 3
+          selector:
+            number:
+              min: 0.0
+              max: 60.0
+              step: 0.5
+              mode: box
+              unit_of_measurement: min
+        fcu_off_extra_delay_entity:
+          name: FCU off additional delay - helper (optional)
+          description: input_number (minutes) that overrides the number above, for
+            dashboard adjustment.
+          default: ''
+          selector:
+            entity:
+              domain:
+              - input_number
+              multiple: false
+              reorder: false
+        restart_delay:
+          name: Restart delay after all doors closed (minutes)
+          description: How long ALL doors must stay closed before cooling can start.
+            Fallback if no helper is linked below.
+          default: 2
+          selector:
+            number:
+              min: 0.0
+              max: 60.0
+              step: 0.5
+              mode: box
+              unit_of_measurement: min
+        restart_delay_entity:
+          name: Restart delay - helper (optional)
+          description: input_number (minutes) that overrides the number above, for
+            dashboard adjustment.
+          default: ''
+          selector:
+            entity:
+              domain:
+              - input_number
+              multiple: false
+              reorder: false
+    behavior:
+      name: Behavior
+      icon: mdi:cog
+      collapsed: true
+      input:
+        restore_hvac_mode:
+          name: Mode to restore when doors are closed
+          default: cool
+          selector:
+            select:
+              mode: dropdown
+              options:
+              - label: Cool
+                value: cool
+              - label: Heat
+                value: heat
+              - label: Heat/Cool
+                value: heat_cool
+              - label: Auto
+                value: auto
+              multiple: false
+              custom_value: false
+              sort: false
+        pause_actions:
+          name: Extra actions when the AC is paused
+          description: Optional - for example, send a notification.
+          default: []
+          selector:
+            action: {}
+        restore_actions:
+          name: Extra actions when cooling resumes
+          description: Optional - for example, send a notification.
+          default: []
+          selector:
+            action: {}
+mode: queued
+max: 15
+max_exceeded: silent
+trigger_variables:
+  t_comp_n: !input compressor_off_delay
+  t_extra_n: !input fcu_off_extra_delay
+  t_restart_n: !input restart_delay
+  h_comp: !input compressor_off_delay_entity
+  h_extra: !input fcu_off_extra_delay_entity
+  h_restart: !input restart_delay_entity
+variables:
+  t_restart_n: !input restart_delay
+  h_restart: !input restart_delay_entity
+  t_restart: '{{ states(h_restart) | float(t_restart_n) }}'
+  pause_flag_entity: !input pause_flag
+  fcu_flag_entity: !input fcu_flag
+triggers:
+- alias: Door open - compressor delay reached
+  id: compressor_off
+  trigger: state
+  entity_id: !input door_sensors
+  to: 'on'
+  for:
+    minutes: '{{ states(h_comp) | float(t_comp_n) }}'
+- alias: Door open - FCU delay reached
+  id: fcu_off
+  trigger: state
+  entity_id: !input door_sensors
+  to: 'on'
+  for:
+    minutes: '{{ (states(h_comp) | float(t_comp_n)) + (states(h_extra) | float(t_extra_n))
+      }}'
+- alias: Door closed - restart delay reached
+  id: doors_closed
+  trigger: state
+  entity_id: !input door_sensors
+  to: 'off'
+  for:
+    minutes: '{{ states(h_restart) | float(t_restart_n) }}'
+- alias: Thermostat started from Off
+  id: enforce_mode
+  trigger: state
+  entity_id: !input climate_entity
+  from: 'off'
+  not_to:
+  - unavailable
+  - unknown
+- alias: Thermostat reconnected while running
+  id: enforce_reconnect
+  trigger: state
+  entity_id: !input climate_entity
+  from:
+  - unavailable
+  - unknown
+  not_to:
+  - 'off'
+  - unavailable
+  - unknown
+- alias: Fan turned on
+  id: enforce_fan
+  trigger: state
+  entity_id: !input climate_entity
+  attribute: fan_mode
+  to: 'on'
+- alias: Home Assistant started
+  id: boot
+  trigger: homeassistant
+  event: start
+actions:
+- choose:
+  - alias: Stage 1 - compressor off
+    conditions:
+    - condition: trigger
+      id: compressor_off
+    - condition: state
+      entity_id: !input pause_flag
+      state: 'off'
+    - condition: not
+      conditions:
+      - condition: state
+        entity_id: !input climate_entity
+        state:
+        - 'off'
+        - unavailable
+        - unknown
+    sequence:
+    - action: input_boolean.turn_on
+      target:
+        entity_id: !input pause_flag
+    - action: climate.set_hvac_mode
+      target:
+        entity_id: !input climate_entity
+      data:
+        hvac_mode: 'off'
+    - delay:
+        seconds: 5
+    - alias: Keep the fan running until the FCU delay
+      action: climate.set_fan_mode
+      continue_on_error: true
+      target:
+        entity_id: !input climate_entity
+      data:
+        fan_mode: 'on'
+    - sequence: !input pause_actions
+  - alias: Stage 2 - FCU off
+    conditions:
+    - condition: trigger
+      id: fcu_off
+    - condition: state
+      entity_id: !input pause_flag
+      state: 'on'
+    sequence:
+    - action: input_boolean.turn_on
+      target:
+        entity_id: !input fcu_flag
+    - action: climate.set_fan_mode
+      continue_on_error: true
+      target:
+        entity_id: !input climate_entity
+      data:
+        fan_mode: auto
+  - alias: Interlock - block a thermostat start
+    conditions:
+    - condition: trigger
+      id:
+      - enforce_mode
+      - enforce_reconnect
+    - condition: not
+      conditions:
+      - condition: state
+        entity_id: !input climate_entity
+        state:
+        - 'off'
+        - unavailable
+        - unknown
+    - condition: or
+      conditions:
+      - alias: Already locked out
+        condition: state
+        entity_id: !input pause_flag
+        state: 'on'
+      - alias: Started by hand while a door is open or not yet settled
+        condition: and
+        conditions:
+        - condition: trigger
+          id: enforce_mode
+        - condition: not
+          conditions:
+          - condition: state
+            entity_id: !input door_sensors
+            state:
+            - 'off'
+            - unavailable
+            - unknown
+            for:
+              minutes: '{{ t_restart }}'
+    sequence:
+    - variables:
+        was_paused: '{{ is_state(pause_flag_entity, ''on'') }}'
+    - action: input_boolean.turn_on
+      target:
+        entity_id: !input pause_flag
+    - action: climate.set_hvac_mode
+      target:
+        entity_id: !input climate_entity
+      data:
+        hvac_mode: 'off'
+    - delay:
+        seconds: 5
+    - alias: Fan follows the current lockout stage
+      action: climate.set_fan_mode
+      continue_on_error: true
+      target:
+        entity_id: !input climate_entity
+      data:
+        fan_mode: '{{ ''on'' if (was_paused and not is_state(fcu_flag_entity, ''on''))
+          else ''auto'' }}'
+  - alias: Interlock - block a fan start
+    conditions:
+    - condition: trigger
+      id: enforce_fan
+    - condition: or
+      conditions:
+      - alias: FCU lockout stage
+        condition: state
+        entity_id: !input fcu_flag
+        state: 'on'
+      - alias: Started by hand while a door is open or not yet settled
+        condition: and
+        conditions:
+        - condition: state
+          entity_id: !input pause_flag
+          state: 'off'
+        - condition: not
+          conditions:
+          - condition: state
+            entity_id: !input door_sensors
+            state:
+            - 'off'
+            - unavailable
+            - unknown
+            for:
+              minutes: '{{ t_restart }}'
+    sequence:
+    - action: climate.set_fan_mode
+      continue_on_error: true
+      target:
+        entity_id: !input climate_entity
+      data:
+        fan_mode: auto
+  - alias: Resume cooling
+    conditions:
+    - condition: trigger
+      id:
+      - doors_closed
+      - boot
+    - condition: state
+      entity_id: !input pause_flag
+      state: 'on'
+    - condition: state
+      entity_id: !input door_sensors
+      state:
+      - 'off'
+      - unavailable
+      - unknown
+    - condition: or
+      conditions:
+      - condition: trigger
+        id: boot
+      - alias: Every door closed for the full restart delay
+        condition: state
+        entity_id: !input door_sensors
+        state:
+        - 'off'
+        - unavailable
+        - unknown
+        for:
+          minutes: '{{ t_restart }}'
+    sequence:
+    - alias: After a restart, still honor the restart delay
+      if:
+      - condition: trigger
+        id: boot
+      then:
+      - delay:
+          minutes: '{{ t_restart }}'
+    - alias: Only resume if no door opened meanwhile
+      if:
+      - condition: state
+        entity_id: !input door_sensors
+        state:
+        - 'off'
+        - unavailable
+        - unknown
+      then:
+      - action: climate.set_hvac_mode
+        target:
+          entity_id: !input climate_entity
+        data:
+          hvac_mode: !input restore_hvac_mode
+      - delay:
+          seconds: 5
+      - action: climate.set_fan_mode
+        continue_on_error: true
+        target:
+          entity_id: !input climate_entity
+        data:
+          fan_mode: auto
+      - action: input_boolean.turn_off
+        target:
+          entity_id:
+          - !input fcu_flag
+          - !input pause_flag
+      - sequence: !input restore_actions

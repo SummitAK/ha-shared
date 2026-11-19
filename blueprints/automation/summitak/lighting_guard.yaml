@@ -1,0 +1,647 @@
+blueprint:
+  name: Lighting Guard v0.4.0
+  description: 'Time-of-day, runtime and occupancy hygiene for lights (and light-like
+    switches, e.g. pool/spa lights on Jandy iAqualink). One instance guards one or
+    more target entities with independently enabled functions:
+
+
+    **1. Dusk-to-dawn schedule** - targets turn ON when the sun''s elevation falls
+    below the threshold (default -4 deg) and OFF when it rises back above it at dawn;
+    an optional off time turns them off earlier in the night - either a fixed time
+    (leave at 00:00:00 to disable) or a time-only input_datetime helper that can be
+    adjusted from a dashboard.
+
+
+    **2. Daylight sweep** - every 15 minutes while the sun is above the daylight threshold
+    (default +10 deg), any target still on is switched off (or reported only, in notify
+    mode). Also runs once when the sun crosses the threshold in the morning.
+
+
+    **3. Max on-time** - each time a target turns on it may stay on for the minutes
+    held in an input_number helper (live-adjustable); if it is still on at the limit
+    it is switched off. Optional: a separate night limit helper used while the sun
+    is below the night elevation; an input_boolean "extend" helper that swaps in a
+    longer limit (reset automatically when the target turns off); and a 15-minute
+    backstop that catches targets whose countdown was lost to a restart or reload.
+
+
+    **4. Occupancy reset** (optional) - occupancy sensors restart a target''s countdown
+    whenever they change during it, and a target is kept on (countdown restarted)
+    if any sensor still reports occupancy when the limit is reached.
+
+
+    **5. Whole-home vacancy** (placeholder, off by default) - when a whole-home occupancy
+    entity has reported vacant for the set minutes, every target still on is switched
+    off.
+
+
+    **6. Failsafes** (optional, v0.4.0) - (A) stale occupancy: an occupancy sensor
+    that reports "on" but has not reported anything to Home Assistant for longer than
+    the stale-limit helper is ignored, so a frozen sensor cannot hold lights on; (B)
+    absolute max on-time: a target is switched off once it has been on for the hours
+    in the absolute-limit helper, whatever occupancy says.
+
+
+    Guard actions are always written to the Logbook. Sun elevation is used instead
+    of clock times so the schedule tracks real seasonal darkness. **Version:** 0.4.0
+    (2026-11-14) - added stale-occupancy and absolute max on-time failsafes.'
+  domain: automation
+  source_url: https://github.com/SummitAK/ha-shared/blob/main/blueprints/automation/summitak/lighting_guard.yaml
+  author: Brendan McKee
+  homeassistant:
+    min_version: 2024.10.0
+  input:
+    targets_section:
+      name: Targets
+      icon: mdi:lightbulb-group
+      input:
+        guard_targets:
+          name: Guarded lights
+          description: Light or switch entities this instance watches.
+          selector:
+            entity:
+              multiple: true
+              domain:
+              - light
+              - switch
+              reorder: false
+        debug_logging:
+          name: Debug logging
+          description: Also log schedule/sweep evaluations, countdown starts and occupancy
+            resets that take no action.
+          default: false
+          selector:
+            boolean: {}
+    schedule_section:
+      name: Dusk-to-dawn schedule
+      icon: mdi:weather-sunset
+      collapsed: true
+      input:
+        sched_enable:
+          name: Enable dusk-to-dawn schedule
+          default: false
+          selector:
+            boolean: {}
+        sched_elevation:
+          name: Dusk/dawn sun elevation (deg)
+          description: Targets turn ON when the sun drops below this elevation and
+            OFF when it rises above it. 0 = horizon; -4 is a dusky default; -6 is
+            civil twilight.
+          default: -4
+          selector:
+            number:
+              min: -18.0
+              max: 10.0
+              step: 0.5
+              mode: slider
+              unit_of_measurement: deg
+        sched_off_time:
+          name: Fixed off time (optional)
+          description: Turn the targets off at this time instead of waiting for dawn.
+            Leave at 00:00:00 to disable and keep them on until dawn.
+          default: 00:00:00
+          selector:
+            time: {}
+        sched_off_time_entity:
+          name: Off time helper (input_datetime, optional)
+          description: A time-only input_datetime holding the off time, so it can
+            be changed from a dashboard without editing this automation. When set,
+            the targets turn off at the helper's time each night. Leave empty to use
+            only the fixed off time above (or dawn).
+          default: []
+          selector:
+            entity:
+              multiple: false
+              domain:
+              - input_datetime
+              reorder: false
+    sweep_section:
+      name: Daylight sweep
+      icon: mdi:broom
+      collapsed: true
+      input:
+        sweep_enable:
+          name: Enable daylight sweep
+          default: false
+          selector:
+            boolean: {}
+        sweep_elevation:
+          name: Daylight sun elevation (deg)
+          description: Sweeps only run while the sun is above this elevation, so lights
+            legitimately on in dim morning/evening hours are left alone.
+          default: 10
+          selector:
+            number:
+              min: 0.0
+              max: 45.0
+              step: 1.0
+              mode: slider
+              unit_of_measurement: deg
+        sweep_mode:
+          name: Sweep action
+          default: turn_off
+          selector:
+            select:
+              mode: dropdown
+              options:
+              - label: Turn the light off
+                value: turn_off
+              - label: Notify only (persistent notification)
+                value: notify
+              multiple: false
+              custom_value: false
+              sort: false
+    maxon_section:
+      name: Max on-time
+      icon: mdi:timer-alert
+      collapsed: true
+      input:
+        maxon_enable:
+          name: Enable max on-time limit
+          default: false
+          selector:
+            boolean: {}
+        maxon_minutes_entity:
+          name: Limit helper (input_number, minutes)
+          description: The normal (daytime, when a night limit is set) on-time limit
+            in minutes. Using a helper keeps the limit adjustable from a dashboard
+            without editing this automation. Falls back to 60 minutes if unset or
+            unavailable.
+          default: []
+          selector:
+            entity:
+              multiple: false
+              domain:
+              - input_number
+              reorder: false
+        maxon_night_minutes_entity:
+          name: Night limit helper (input_number, minutes, optional)
+          description: When set, this limit applies instead of the normal limit while
+            the sun is below the night elevation below. Leave empty to use the normal
+            limit around the clock.
+          default: []
+          selector:
+            entity:
+              multiple: false
+              domain:
+              - input_number
+              reorder: false
+        maxon_night_elevation:
+          name: Night sun elevation (deg)
+          description: The night limit applies while the sun is below this elevation.
+            Evaluated when each countdown starts.
+          default: 3
+          selector:
+            number:
+              min: -18.0
+              max: 20.0
+              step: 0.5
+              mode: slider
+              unit_of_measurement: deg
+        maxon_extend_boolean:
+          name: Extend toggle (input_boolean, optional)
+          description: While this helper is ON, the extended limit below applies instead.
+            It is turned back off automatically when the target turns off.
+          default: []
+          selector:
+            entity:
+              multiple: false
+              domain:
+              - input_boolean
+              reorder: false
+        maxon_extended_minutes_entity:
+          name: Extended limit helper (input_number, minutes, optional)
+          description: Falls back to 240 minutes if unset or unavailable.
+          default: []
+          selector:
+            entity:
+              multiple: false
+              domain:
+              - input_number
+              reorder: false
+        maxon_absolute_entity:
+          name: Absolute max on-time helper (input_number, hours, optional)
+          description: Failsafe B. A target that has been on continuously for this
+            many hours is switched off even if occupancy says the room is in use.
+            0 or empty disables it. While the extend toggle is on, the extended limit
+            is used if it is longer. Choose a value longer than normal evening use.
+          default: []
+          selector:
+            entity:
+              multiple: false
+              domain:
+              - input_number
+              reorder: false
+        maxon_backstop:
+          name: Backstop check (every 15 min)
+          description: Turns off any target that has been on longer than its limit
+            plus 5 minutes (measured from when it turned on or occupancy last changed,
+            whichever is later), or longer than the absolute max on-time. Catches
+            countdowns lost to a restart, an automation reload, or a target turned
+            on while this automation was off.
+          default: true
+          selector:
+            boolean: {}
+    occupancy_section:
+      name: Occupancy reset
+      icon: mdi:motion-sensor
+      collapsed: true
+      input:
+        occupancy_entities:
+          name: Occupancy sensors (optional)
+          description: Any change of these sensors during a countdown restarts it,
+            and if any reports occupancy (on) when the limit is reached the countdown
+            restarts instead of turning the target off. Needs Max on-time enabled.
+            Leave empty for a plain timer.
+          default: []
+          selector:
+            entity:
+              multiple: true
+              domain:
+              - binary_sensor
+              reorder: false
+        occupancy_stale_entity:
+          name: Stale-occupancy limit helper (input_number, minutes, optional)
+          description: Failsafe A. An occupancy sensor that shows "on" but has sent
+            no update to Home Assistant (last_reported) for longer than this many
+            minutes is treated as frozen and ignored, so the countdown can expire.
+            0 or empty disables it. Suited to polled sensors such as Ecobee, which
+            report every few minutes; event-only sensors that stay silent while occupied
+            need a longer value.
+          default: []
+          selector:
+            entity:
+              multiple: false
+              domain:
+              - input_number
+              reorder: false
+    home_section:
+      name: Whole-home occupancy (placeholder)
+      icon: mdi:home-account
+      collapsed: true
+      input:
+        home_occupancy_entity:
+          name: Whole-home occupancy entity (optional)
+          description: A binary_sensor or input_boolean that is ON while anyone is
+            home. Placeholder for a future presence layer.
+          default: []
+          selector:
+            entity:
+              multiple: false
+              domain:
+              - binary_sensor
+              - input_boolean
+              reorder: false
+        vacancy_enable:
+          name: Turn targets off when the home is vacant
+          default: false
+          selector:
+            boolean: {}
+        vacancy_minutes:
+          name: Vacant for (minutes)
+          default: 30
+          selector:
+            number:
+              min: 5.0
+              max: 240.0
+              step: 5.0
+              mode: box
+              unit_of_measurement: min
+mode: parallel
+max: 40
+trace:
+  stored_traces: 25
+variables:
+  guard_targets: !input guard_targets
+  debug_logging: !input debug_logging
+  sched_enable: !input sched_enable
+  sweep_elevation: !input sweep_elevation
+  sweep_mode: !input sweep_mode
+  maxon_enable: !input maxon_enable
+  maxon_minutes_entity: !input maxon_minutes_entity
+  maxon_night_minutes_entity: !input maxon_night_minutes_entity
+  maxon_night_elevation: !input maxon_night_elevation
+  maxon_extend_boolean: !input maxon_extend_boolean
+  maxon_extended_minutes_entity: !input maxon_extended_minutes_entity
+  maxon_absolute_entity: !input maxon_absolute_entity
+  occupancy_entities: !input occupancy_entities
+  occupancy_stale_entity: !input occupancy_stale_entity
+  home_occupancy_entity: !input home_occupancy_entity
+trigger_variables:
+  sched_off_time: !input sched_off_time
+  sched_off_time_entity: !input sched_off_time_entity
+  tv_maxon_enable: !input maxon_enable
+  tv_maxon_backstop: !input maxon_backstop
+  tv_vacancy_enable: !input vacancy_enable
+  tv_home_occupancy_entity: !input home_occupancy_entity
+triggers:
+- alias: DuskBelow
+  id: DuskBelow
+  trigger: numeric_state
+  entity_id: sun.sun
+  attribute: elevation
+  below: !input sched_elevation
+  enabled: !input sched_enable
+- alias: DawnAbove
+  id: DawnAbove
+  trigger: numeric_state
+  entity_id: sun.sun
+  attribute: elevation
+  above: !input sched_elevation
+  enabled: !input sched_enable
+- alias: FixedOff
+  id: FixedOff
+  trigger: time
+  at: !input sched_off_time
+  enabled: '{{ sched_off_time != ''00:00:00'' }}'
+- alias: HelperOff
+  id: FixedOff
+  trigger: time
+  at: !input sched_off_time_entity
+  enabled: '{{ sched_off_time_entity not in [none, '''', []] }}'
+- alias: SweepTick
+  id: SweepTick
+  trigger: time_pattern
+  minutes: /15
+  enabled: !input sweep_enable
+- alias: SweepDawn
+  id: SweepDawn
+  trigger: numeric_state
+  entity_id: sun.sun
+  attribute: elevation
+  above: !input sweep_elevation
+  enabled: !input sweep_enable
+- alias: TargetOn
+  id: TargetOn
+  trigger: state
+  entity_id: !input guard_targets
+  to: 'on'
+  enabled: !input maxon_enable
+- alias: Backstop
+  id: Backstop
+  trigger: time_pattern
+  minutes: /15
+  enabled: '{{ tv_maxon_enable and tv_maxon_backstop }}'
+- alias: HomeVacant
+  id: HomeVacant
+  trigger: state
+  entity_id: !input home_occupancy_entity
+  to: 'off'
+  not_from:
+  - unavailable
+  - unknown
+  for:
+    minutes: !input vacancy_minutes
+  enabled: '{{ tv_vacancy_enable and tv_home_occupancy_entity not in [none, '''',
+    []] }}'
+actions:
+- choose:
+  - alias: Dusk - turn the schedule targets on
+    conditions: '{{ trigger.id == ''DuskBelow'' }}'
+    sequence:
+    - action: homeassistant.turn_on
+      continue_on_error: true
+      target:
+        entity_id: !input guard_targets
+    - action: logbook.log
+      data:
+        name: Lighting Guard
+        message: Dusk (sun below threshold) - turned on {{ guard_targets | join(',
+          ') }}.
+  - alias: Dawn or off time - turn the schedule targets off
+    conditions: "{{ (trigger.id == 'DawnAbove' and sched_enable)\n   or trigger.id
+      == 'FixedOff' }}"
+    sequence:
+    - action: homeassistant.turn_off
+      continue_on_error: true
+      target:
+        entity_id: !input guard_targets
+    - action: logbook.log
+      data:
+        name: Lighting Guard
+        message: '{{ ''Dawn'' if trigger.id == ''DawnAbove'' else ''Off time'' }}
+          - turned off {{ guard_targets | join('', '') }}.'
+  - alias: Daylight sweep - handle targets left on
+    conditions: "{{ trigger.id in ['SweepTick', 'SweepDawn']\n   and state_attr('sun.sun',
+      'elevation') | float(-90)\n       > sweep_elevation | float }}"
+    sequence:
+    - variables:
+        left_on: "{{ expand(guard_targets) | selectattr('state', 'eq', 'on')\n   |
+          map(attribute='entity_id') | list }}"
+    - if:
+      - condition: template
+        value_template: '{{ left_on | length > 0 }}'
+      then:
+      - if:
+        - condition: template
+          value_template: '{{ sweep_mode == ''turn_off'' }}'
+        then:
+        - action: homeassistant.turn_off
+          continue_on_error: true
+          target:
+            entity_id: '{{ left_on }}'
+        else:
+        - action: persistent_notification.create
+          data:
+            notification_id: "lighting_guard_{{ this.entity_id\n                  |
+              default('sweep') }}"
+            title: Lights on in daylight
+            message: 'Still on: {{ left_on | join('', '') }}'
+      - action: logbook.log
+        data:
+          name: Lighting Guard
+          message: 'Daylight sweep {{ ''turned off'' if sweep_mode == ''turn_off''
+            else ''flagged'' }}: {{ left_on | join('', '') }}.'
+      else:
+      - alias: Log a quiet sweep when debug logging is on
+        enabled: !input debug_logging
+        action: logbook.log
+        data:
+          name: Lighting Guard
+          message: Daylight sweep - nothing left on.
+  - alias: Max on-time - run the countdown for the target that turned on
+    conditions: '{{ trigger.id == ''TargetOn'' }}'
+    sequence:
+    - variables:
+        tgt: '{{ trigger.entity_id }}'
+        t_on: '{{ now().timestamp() }}'
+    - repeat:
+        while:
+        - condition: template
+          value_template: '{{ is_state(tgt, ''on'') }}'
+        sequence:
+        - alias: Work out this countdown's limit (day, night or extended) and the
+            absolute cap
+          variables:
+            normal_min: "{{ states(maxon_minutes_entity) | float(60)\n   if maxon_minutes_entity
+              not in [none, '', []] else 60 }}"
+            has_night: '{{ maxon_night_minutes_entity not in [none, '''', []] }}'
+            night_min: '{{ states(maxon_night_minutes_entity) | float(normal_min)
+              if has_night else normal_min }}'
+            is_night: '{{ has_night and state_attr(''sun.sun'', ''elevation'') | float(90)
+              < maxon_night_elevation | float(3) }}'
+            use_ext: "{{ maxon_extend_boolean not in [none, '', []]\n   and is_state(maxon_extend_boolean,
+              'on') }}"
+            ext_min: "{{ states(maxon_extended_minutes_entity) | float(240)\n   if
+              maxon_extended_minutes_entity not in [none, '', []]\n   else 240 }}"
+            limit_min: '{{ ext_min if use_ext else (night_min if is_night else normal_min)
+              }}'
+            abs_h: "{{ states(maxon_absolute_entity) | float(0)\n   if maxon_absolute_entity
+              not in [none, '', []] else 0 }}"
+            abs_sec: "{{ 0 if abs_h | float(0) <= 0\n   else ([abs_h | float * 3600,
+              ext_min | float * 60] | max if use_ext else abs_h | float * 3600) }}"
+            wait_min: "{{ limit_min | float if abs_sec | float(0) <= 0\n   else [limit_min
+              | float, [(abs_sec | float - (now().timestamp() - t_on | float)) / 60,
+              0.1] | max] | min }}"
+            t0: '{{ now().timestamp() }}'
+        - alias: Log the countdown when debug logging is on
+          enabled: !input debug_logging
+          action: logbook.log
+          data:
+            name: Lighting Guard
+            message: '{{ tgt }} - countdown {{ wait_min | round(1) }} min {{ ''(extended)''
+              if use_ext else (''(night)'' if is_night else '''') }}.'
+        - alias: Wait for the target to go off, occupancy to change, or the limit
+          wait_template: "{{ not is_state(tgt, 'on')\n   or (occupancy_entities |
+            count > 0\n       and expand(occupancy_entities) | map(attribute='last_changed')\n
+            \          | map('as_timestamp') | select('gt', t0) | list | count > 0)
+            }}"
+          timeout:
+            minutes: '{{ wait_min }}'
+          continue_on_timeout: true
+        - alias: Check the failsafes - absolute cap and stale occupancy sensors
+          variables:
+            abs_hit: '{{ abs_sec | float(0) > 0 and now().timestamp() - t_on | float
+              >= abs_sec | float - 5 }}'
+            stale_min: "{{ states(occupancy_stale_entity) | float(0)\n   if occupancy_stale_entity
+              not in [none, '', []] else 0 }}"
+            occ: "{% set ns = namespace(fresh=[], stale=[]) %}\n{% for s in expand(occupancy_entities)
+              | selectattr('state', 'eq', 'on') %}\n  {% if stale_min | float(0) <=
+              0 or (now() - s.last_reported).total_seconds() < stale_min | float(0)
+              * 60 %}\n    {% set ns.fresh = ns.fresh + [s.entity_id] %}\n  {% else
+              %}\n    {% set ns.stale = ns.stale + [s.entity_id] %}\n  {% endif %}\n{%
+              endfor %}\n{{ {'fresh': ns.fresh, 'stale': ns.stale} }}"
+        - choose:
+          - alias: Target already off - nothing to do
+            conditions: '{{ not is_state(tgt, ''on'') }}'
+            sequence: []
+          - alias: Occupancy changed during the countdown - restart it
+            conditions: '{{ wait.completed and not abs_hit }}'
+            sequence:
+            - enabled: !input debug_logging
+              action: logbook.log
+              data:
+                name: Lighting Guard
+                message: '{{ tgt }} - occupancy activity, countdown restarted.'
+          - alias: Limit reached but still occupied (fresh sensor) - restart the countdown
+            conditions: '{{ not abs_hit and occ.fresh | count > 0 }}'
+            sequence:
+            - enabled: !input debug_logging
+              action: logbook.log
+              data:
+                name: Lighting Guard
+                message: '{{ tgt }} - limit reached while occupied ({{ occ.fresh |
+                  join('', '') }}), countdown restarted.'
+          default:
+          - action: homeassistant.turn_off
+            continue_on_error: true
+            target:
+              entity_id: '{{ tgt }}'
+          - action: logbook.log
+            data:
+              name: Lighting Guard
+              message: '{% if abs_hit %}{{ tgt }} reached the absolute max on-time
+                ({{ (abs_sec | float / 3600) | round(1) }} h) and was turned off,
+                overriding occupancy.{% else %}{{ tgt }} reached its max on-time ({{
+                limit_min }} min{{ '', night'' if is_night and not use_ext else ''''
+                }}) and was turned off.{% endif %}{% if occ.stale | count > 0 %} Ignored
+                stale occupancy sensor(s) with no update for over {{ stale_min | int
+                }} min: {{ occ.stale | join('', '') }}.{% endif %}'
+          - alias: Give the device a moment to report off
+            wait_template: '{{ not is_state(tgt, ''on'') }}'
+            timeout:
+              minutes: 1
+            continue_on_timeout: true
+    - alias: Reset the extend toggle once the target is off
+      if:
+      - condition: template
+        value_template: "{{ maxon_extend_boolean not in [none, '', []]\n   and is_state(maxon_extend_boolean,
+          'on') }}"
+      then:
+      - action: input_boolean.turn_off
+        continue_on_error: true
+        target:
+          entity_id: '{{ maxon_extend_boolean }}'
+  - alias: Backstop - turn off targets past their limit with no running countdown
+    conditions: '{{ trigger.id == ''Backstop'' }}'
+    sequence:
+    - variables:
+        normal_min: "{{ states(maxon_minutes_entity) | float(60)\n   if maxon_minutes_entity
+          not in [none, '', []] else 60 }}"
+        has_night: '{{ maxon_night_minutes_entity not in [none, '''', []] }}'
+        night_min: '{{ states(maxon_night_minutes_entity) | float(normal_min) if has_night
+          else normal_min }}'
+        is_night: '{{ has_night and state_attr(''sun.sun'', ''elevation'') | float(90)
+          < maxon_night_elevation | float(3) }}'
+        use_ext: "{{ maxon_extend_boolean not in [none, '', []]\n   and is_state(maxon_extend_boolean,
+          'on') }}"
+        ext_min: "{{ states(maxon_extended_minutes_entity) | float(240)\n   if maxon_extended_minutes_entity
+          not in [none, '', []]\n   else 240 }}"
+        limit_min: '{{ ext_min if use_ext else (night_min if is_night else normal_min)
+          }}'
+        abs_h: "{{ states(maxon_absolute_entity) | float(0)\n   if maxon_absolute_entity
+          not in [none, '', []] else 0 }}"
+        abs_sec: "{{ 0 if abs_h | float(0) <= 0\n   else ([abs_h | float * 3600, ext_min
+          | float * 60] | max if use_ext else abs_h | float * 3600) }}"
+        stale_min: "{{ states(occupancy_stale_entity) | float(0)\n   if occupancy_stale_entity
+          not in [none, '', []] else 0 }}"
+        occ: "{% set ns = namespace(fresh=[], stale=[]) %}\n{% for s in expand(occupancy_entities)
+          | selectattr('state', 'eq', 'on') %}\n  {% if stale_min | float(0) <= 0
+          or (now() - s.last_reported).total_seconds() < stale_min | float(0) * 60
+          %}\n    {% set ns.fresh = ns.fresh + [s.entity_id] %}\n  {% else %}\n    {%
+          set ns.stale = ns.stale + [s.entity_id] %}\n  {% endif %}\n{% endfor %}\n{{
+          {'fresh': ns.fresh, 'stale': ns.stale} }}"
+        occupied: '{{ occ.fresh | count > 0 }}'
+        occ_ts: "{{ expand(occupancy_entities) | map(attribute='last_changed')\n   |
+          map('as_timestamp') | max\n   if occupancy_entities | count > 0 else 0 }}"
+        overdue: "{% set ns = namespace(ids=[]) %}\n{% for s in expand(guard_targets)
+          | selectattr('state', 'eq', 'on') %}\n  {% set on_for = now().timestamp()
+          - as_timestamp(s.last_changed) %}\n  {% set ref = [as_timestamp(s.last_changed),
+          occ_ts | float(0)] | max %}\n  {% if (abs_sec | float(0) > 0 and on_for
+          > abs_sec | float + 300)\n        or (not occupied and now().timestamp()
+          - ref > (limit_min | float + 5) * 60) %}\n    {% set ns.ids = ns.ids + [s.entity_id]
+          %}\n  {% endif %}\n{% endfor %}\n{{ ns.ids }}"
+    - if:
+      - condition: template
+        value_template: '{{ overdue | count > 0 }}'
+      then:
+      - action: homeassistant.turn_off
+        continue_on_error: true
+        target:
+          entity_id: '{{ overdue }}'
+      - action: logbook.log
+        data:
+          name: Lighting Guard
+          message: 'Backstop turned off {{ overdue | join('', '') }} (past {{ limit_min
+            }} min{{ '', night'' if is_night and not use_ext else '''' }}{{ '' or
+            the '' ~ (abs_sec | float / 3600) | round(1) ~ '' h absolute cap'' if
+            abs_sec | float(0) > 0 else '''' }}).{% if occ.stale | count > 0 %} Ignored
+            stale occupancy sensor(s): {{ occ.stale | join('', '') }}.{% endif %}'
+  - alias: Whole-home vacancy - turn every target off
+    conditions: '{{ trigger.id == ''HomeVacant'' }}'
+    sequence:
+    - variables:
+        left_on: "{{ expand(guard_targets) | selectattr('state', 'eq', 'on')\n   |
+          map(attribute='entity_id') | list }}"
+    - if:
+      - condition: template
+        value_template: '{{ left_on | length > 0 }}'
+      then:
+      - action: homeassistant.turn_off
+        continue_on_error: true
+        target:
+          entity_id: '{{ left_on }}'
+      - action: logbook.log
+        data:
+          name: Lighting Guard
+          message: Home vacant - turned off {{ left_on | join(', ') }}.

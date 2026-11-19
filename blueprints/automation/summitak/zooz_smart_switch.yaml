@@ -1,0 +1,1318 @@
+blueprint:
+  name: Zooz Smart Switch Suite (ZEN71/72/76/77/32/35) v0.5.0
+  description: 'One blueprint to configure and automate Zooz Z-Wave switches: ZEN71/ZEN76
+    (on/off), ZEN72/ZEN77 (dimmers), ZEN32/ZEN35 (scene controllers).
+
+
+    **What it does (v0.1.0):**
+
+    - Graphical editing of the most-used Z-Wave configuration parameters. Settings
+    default to "No change" / -1 (except the ZEN77 house defaults listed under v0.4.0),
+    so only the settings you pick are written to the switch. Parameter numbers are
+    translated per model automatically (e.g. LED color is parameter 14 on ZEN71/76,
+    23 on ZEN72/77, 6 on ZEN32/35).
+
+    - Extended LED colors (White/Blue/Green/Red/Magenta/Yellow/Cyan) with the 1-10
+    brightness scale carried over from the local ZEN32 blueprint fork. On models/firmware
+    that only support 4 colors (all ZEN7x) the extended colors fold to the nearest
+    supported color; on 0-2 brightness firmware the 1-10 scale folds to Low/Medium/Bright.
+
+    - Paddle scene actions: tap 1x-5x, hold, and release actions for the upper (001)
+    and lower (002) paddles. On ZEN32/35 these keys are small buttons 1 and 2; full
+    5-button support stays in the ZEN32 LED-tracking blueprint for now.
+
+    - **Stepped dimming**: an optional mode that replaces hold-to-ramp with discrete
+    steps - hold the upper paddle to step brightness UP in configurable increments
+    (default 10% from 20% to 100%), hold the lower paddle to step DOWN (default 100%
+    to 20%), with an editable pause per level in milliseconds. Works best when the
+    switch does not locally dim its own load (smart bulb mode, or a separate target
+    light).
+
+
+    Settings are pushed to the switch 60 s after Home Assistant starts and every time
+    you save this automation, so the blueprint form works as a graphical config editor.
+    **Scene Control must be set to Enable** for paddle actions and stepped dimming
+    to work.
+
+
+    Parameter maps verified against the Z-Wave JS device database (zwave-js config
+    files for ZEN71/72/76/77/32/35, Oct 2026). **Version:** 0.5.0
+
+
+    **v0.5.0:** Follow light (LED/state mirror) - optional. Pick the light this switch
+    controls remotely (typically on a no-load ZEN7x wired as a remote for a load switch
+    elsewhere). Whenever that light turns on or off from ANY source - its own load
+    paddle, another automation such as Lighting Guard, a dashboard or voice - this
+    switch is set to the same on/off state, so its LED shows the same color as the
+    load switch. Also re-syncs 60 s after Home Assistant starts and whenever this
+    automation is saved. Leave empty to disable (default). No loop risk: Z-Wave on/off
+    commands do not generate paddle (Central Scene) events, and this blueprint only
+    acts on paddle events.
+
+
+    **v0.4.2:** State after power failure now defaults to "Always off" (all models
+    except ZEN32, which uses its own map). Automations for ZEN32/ZEN35/ZEN71/ZEN72/ZEN76
+    that should keep their current setting must set it to "No change" explicitly.
+
+
+    **v0.4.1:** Fixed the LED scale / extended-color detection helpers. They rendered
+    the lowercase text "false" for ZEN7x models, which Home Assistant treats as a
+    (truthy) string, so ZEN7x switches were sent 1-10 brightness values (for example
+    Low = 3) that the hardware rejects (valid range 0-2) and extended-color values
+    were not folded. They now render real booleans.
+
+
+    **v0.4.0:** House defaults for the ZEN77 and two new ZEN77 settings. New defaults:
+    LED indicator mode = On when load is off, LED color = Green, LED brightness =
+    Low (30%), Local Programming = Disabled, Opposite-state LED = White. New inputs:
+    Local programming (ZEN77 parameter 26) and Opposite-state LED color (ZEN77 parameter
+    37; the ZEN77 has no separate brightness setting for it). The new inputs only
+    apply to the ZEN77; they are ignored on other models. The three LED defaults DO
+    apply to every model, so automations for ZEN32/ZEN35/ZEN71/ZEN72/ZEN76 that should
+    keep their current LED settings must set LED mode, color and brightness to "No
+    change" explicitly.
+
+
+    **v0.3.0:** Electrical identification fields - Circuit Breaker Panel and Breaker
+    Circuit are stored with each switch''s automation (shown in this form with the
+    other switch settings, included in debug logging and traces) so the breakers to
+    lock out for electrical work can be reconciled per switch instead of being crammed
+    into device names.
+
+
+    **v0.2.1:** One-button bidirectional stepping - set the step-UP and step-DOWN
+    keys to the SAME key and the light''s state picks the direction: holding while
+    the light is ON steps it down, holding while it is OFF steps it up from the lowest
+    level. Made for the ZEN32/35 big button (key 005).
+
+
+    **v0.2.0:** The scene keys that drive stepped dimming are now selectable, so ZEN32/ZEN35
+    buttons can step any light: ZEN7x 001 = upper / 002 = lower paddle; ZEN32 001-004
+    = small buttons, 005 = big button; ZEN35 001-004 = small buttons, 005 = dimmer
+    paddle. ZEN32 small buttons have no local load, so Hold-step works on them without
+    smart bulb mode.
+
+
+    **v0.1.1:** Stepped dimming now has two styles - Hold-step (discrete steps while
+    held; for no-load / smart bulb units) and Release-snap (the hardware hold-dim
+    ramps normally, brightness snaps to the nearest step on release; for load-connected
+    dimmers, where local dimming overrides Z-Wave steps while the paddle is held).
+    All step commands now use continue_on_error so one failed Z-Wave write cannot
+    hang a run.
+
+    '
+  domain: automation
+  source_url: https://github.com/SummitAK/ha-shared/blob/main/blueprints/automation/summitak/zooz_smart_switch.yaml
+  author: Brendan McKee
+  homeassistant:
+    min_version: 2024.10.0
+  input:
+    switch_section:
+      name: Switch
+      icon: mdi:light-switch
+      input:
+        zooz_switch:
+          name: Zooz switch
+          description: A Zooz ZEN71, ZEN72, ZEN76, ZEN77, ZEN32, or ZEN35 (including
+            800LR variants).
+          selector:
+            device:
+              filter:
+              - integration: zwave_js
+                manufacturer: Zooz
+                model: ZEN71
+              - integration: zwave_js
+                manufacturer: Zooz
+                model: ZEN71 800LR
+              - integration: zwave_js
+                manufacturer: Zooz
+                model: ZEN72
+              - integration: zwave_js
+                manufacturer: Zooz
+                model: ZEN72 800LR
+              - integration: zwave_js
+                manufacturer: Zooz
+                model: ZEN76
+              - integration: zwave_js
+                manufacturer: Zooz
+                model: ZEN76 800LR
+              - integration: zwave_js
+                manufacturer: Zooz
+                model: ZEN77
+              - integration: zwave_js
+                manufacturer: Zooz
+                model: ZEN77 800LR
+              - integration: zwave_js
+                manufacturer: Zooz
+                model: ZEN32
+              - integration: zwave_js
+                manufacturer: Zooz
+                model: ZEN32 800LR
+              - integration: zwave_js
+                manufacturer: Zooz
+                model: ZEN35
+              multiple: false
+        led_scale_override:
+          name: LED brightness scale
+          description: Auto-detect picks the 1-10 scale on ZEN32 firmware 3.30-9.x
+            and ZEN35 1.40+, and the Bright/Medium/Low (0-2) scale everywhere else
+            (all ZEN7x use 0-2). Override only if auto-detect gets it wrong.
+          default: auto
+          selector:
+            select:
+              mode: dropdown
+              options:
+              - label: Auto-detect from model and firmware (Recommended)
+                value: auto
+              - label: 1-10 scale
+                value: new
+              - label: 0-2 scale (Bright/Medium/Low)
+                value: legacy
+              multiple: false
+              custom_value: false
+              sort: false
+        debug_logging:
+          name: Debug logging
+          description: Write received button events to the Logbook.
+          default: false
+          selector:
+            boolean: {}
+        breaker_panel:
+          name: Circuit breaker panel
+          description: Electrical documentation - the panel that feeds this switch
+            (e.g. "Main" or "Garage sub-panel"). Stored here with the switch's other
+            settings for safety lockout reconciliation; no effect on behavior.
+          default: ''
+          selector:
+            text:
+              multiline: false
+              multiple: false
+        breaker_circuit:
+          name: Breaker circuit
+          description: Electrical documentation - the breaker number in that panel
+            (e.g. "7" or "21"). No effect on behavior.
+          default: ''
+          selector:
+            text:
+              multiline: false
+              multiple: false
+    config_common:
+      name: Switch configuration - all models
+      icon: mdi:cog
+      collapsed: true
+      input:
+        cfg_orientation:
+          name: Paddle orientation (ZEN7x only)
+          description: Parameter 1. Not available on ZEN32/ZEN35.
+          default: nc
+          selector:
+            select:
+              mode: dropdown
+              options:
+              - label: No change
+                value: nc
+              - label: Normal (top = on)
+                value: '0'
+              - label: Inverted (top = off)
+                value: '1'
+              - label: Momentary (any press toggles)
+                value: '2'
+              multiple: false
+              custom_value: false
+              sort: false
+        cfg_led_mode:
+          name: LED indicator mode
+          description: When the LED is lit. On ZEN32/ZEN35 this applies to the big
+            relay/dimmer button. Default (v0.4.0) is "On when load is off" - set "No
+            change" explicitly on non-ZEN77 switches that should keep their current
+            setting.
+          default: '0'
+          selector:
+            select:
+              mode: dropdown
+              options:
+              - label: No change
+                value: nc
+              - label: On when load is off
+                value: '0'
+              - label: On when load is on
+                value: '1'
+              - label: Always off
+                value: '2'
+              - label: Always on
+                value: '3'
+              multiple: false
+              custom_value: false
+              sort: false
+        cfg_led_color:
+          name: LED indicator color
+          description: Extended colors (Magenta/Yellow/Cyan) are supported on ZEN32
+            (firmware 2.10+) and ZEN35. On ZEN7x they fold to the nearest supported
+            color (Magenta to Red, Yellow to White, Cyan to Blue). On ZEN32/ZEN35
+            this sets the big-button LED. Default (v0.4.0) is Green - set "No change"
+            explicitly on non-ZEN77 switches that should keep their current setting.
+          default: '2'
+          selector:
+            select:
+              mode: dropdown
+              options:
+              - label: No change
+                value: nc
+              - label: White
+                value: '0'
+              - label: Blue
+                value: '1'
+              - label: Green
+                value: '2'
+              - label: Red
+                value: '3'
+              - label: Magenta
+                value: '4'
+              - label: Yellow
+                value: '5'
+              - label: Cyan
+                value: '6'
+              multiple: false
+              custom_value: false
+              sort: false
+        cfg_led_brightness:
+          name: LED indicator brightness
+          description: 1-10 scale with presets. Folds to Bright/Medium/Low on 0-2
+            scale hardware (all ZEN7x; ZEN32/ZEN35 on legacy firmware). Default (v0.4.0)
+            is the Low preset (30% on ZEN7x) - set "No change" explicitly on non-ZEN77
+            switches that should keep their current setting.
+          default: low
+          selector:
+            select:
+              mode: dropdown
+              options:
+              - label: No change
+                value: nc
+              - label: 1 (dimmest / 10%)
+                value: '1'
+              - label: '2'
+                value: '2'
+              - label: '3'
+                value: '3'
+              - label: '4'
+                value: '4'
+              - label: '5'
+                value: '5'
+              - label: '6'
+                value: '6'
+              - label: '7'
+                value: '7'
+              - label: '8'
+                value: '8'
+              - label: '9'
+                value: '9'
+              - label: 10 (brightest / 100%)
+                value: '10'
+              - label: Low preset (3 / legacy Low)
+                value: low
+              - label: Medium preset (6 / legacy Medium)
+                value: medium
+              - label: Bright preset (10 / legacy Bright)
+                value: bright
+              multiple: false
+              custom_value: false
+              sort: false
+        cfg_opposite_led:
+          name: Opposite-state LED color (ZEN77 only)
+          description: Parameter 37. The LED color shown in the opposite switch state
+            when LED indicator mode is "On when load is off" or "On when load is on"
+            (for example, with "On when load is off" this is the color shown while
+            the load is ON). Off turns that LED off. The ZEN77 has no separate brightness
+            setting for this LED; it follows the LED indicator brightness. Ignored
+            on other models.
+          default: white
+          selector:
+            select:
+              mode: dropdown
+              options:
+              - label: No change
+                value: nc
+              - label: 'Off'
+                value: 'off'
+              - label: White
+                value: white
+              - label: Blue
+                value: blue
+              - label: Green
+                value: green
+              - label: Red
+                value: red
+              multiple: false
+              custom_value: false
+              sort: false
+        cfg_auto_off:
+          name: Auto turn-off timer (minutes)
+          description: -1 = no change. 0 = timer disabled. 1-65535 = turn the load
+            off after this many minutes.
+          default: -1
+          selector:
+            number:
+              min: -1.0
+              max: 65535.0
+              step: 1.0
+              mode: box
+              unit_of_measurement: min
+        cfg_auto_on:
+          name: Auto turn-on timer (minutes)
+          description: -1 = no change. 0 = timer disabled. 1-65535 minutes.
+          default: -1
+          selector:
+            number:
+              min: -1.0
+              max: 65535.0
+              step: 1.0
+              mode: box
+              unit_of_measurement: min
+        cfg_power_failure:
+          name: State after power failure
+          description: Translated per model (ZEN32 uses a different value map). Default
+            (v0.4.2) is Always off - set "No change" on non-ZEN77 models to keep their
+            current setting.
+          default: 'off'
+          selector:
+            select:
+              mode: dropdown
+              options:
+              - label: No change
+                value: nc
+              - label: Always off
+                value: 'off'
+              - label: Always on
+                value: 'on'
+              - label: Previous state
+                value: previous
+              multiple: false
+              custom_value: false
+              sort: false
+        cfg_smart_mode:
+          name: Smart switch mode (load control)
+          description: Disable local control for smart bulb mode, or when the paddle
+            should only run scenes.
+          default: nc
+          selector:
+            select:
+              mode: dropdown
+              options:
+              - label: No change
+                value: nc
+              - label: Local control disabled (smart bulb mode)
+                value: '0'
+              - label: Local and Z-Wave control enabled
+                value: '1'
+              - label: Local and Z-Wave control disabled
+                value: '2'
+              multiple: false
+              custom_value: false
+              sort: false
+        cfg_scene_control:
+          name: Scene control
+          description: Must be ENABLED for paddle actions and stepped dimming in this
+            blueprint to receive button events. Translated per model (the ZEN32 relay-button
+            parameter is inverted).
+          default: nc
+          selector:
+            select:
+              mode: dropdown
+              options:
+              - label: No change
+                value: nc
+              - label: Enable
+                value: enable
+              - label: Disable
+                value: disable
+              multiple: false
+              custom_value: false
+              sort: false
+        cfg_local_programming:
+          name: Local programming (ZEN77 only)
+          description: Parameter 26. Controls whether the switch can be included/excluded
+            through physical paddle sequences. Disabling it frees those sequences
+            for scene control; a factory reset remains available. Default (v0.4.0)
+            is Disabled. Ignored on other models.
+          default: disable
+          selector:
+            select:
+              mode: dropdown
+              options:
+              - label: No change
+                value: nc
+              - label: Enable local programming
+                value: enable
+              - label: Disable local programming
+                value: disable
+              multiple: false
+              custom_value: false
+              sort: false
+    config_dimmer:
+      name: Switch configuration - dimmers (ZEN72/ZEN77/ZEN35)
+      icon: mdi:brightness-6
+      collapsed: true
+      input:
+        cfg_ramp_on_manual:
+          name: Ramp rate ON - paddle (seconds)
+          description: -1 = no change. 0 = instant on. 1-99 seconds.
+          default: -1
+          selector:
+            number:
+              min: -1.0
+              max: 99.0
+              step: 1.0
+              mode: box
+              unit_of_measurement: s
+        cfg_ramp_off_manual:
+          name: Ramp rate OFF - paddle (seconds)
+          description: -1 = no change. 0 = instant off. 1-99 seconds.
+          default: -1
+          selector:
+            number:
+              min: -1.0
+              max: 99.0
+              step: 1.0
+              mode: box
+              unit_of_measurement: s
+        cfg_min_brightness:
+          name: Minimum brightness (%)
+          description: -1 = no change. 1-99.
+          default: -1
+          selector:
+            number:
+              min: -1.0
+              max: 99.0
+              step: 1.0
+              mode: box
+              unit_of_measurement: '%'
+        cfg_max_brightness:
+          name: Maximum brightness (%)
+          description: -1 = no change. 1-99.
+          default: -1
+          selector:
+            number:
+              min: -1.0
+              max: 99.0
+              step: 1.0
+              mode: box
+              unit_of_measurement: '%'
+        cfg_double_tap:
+          name: Double-tap upper paddle behavior
+          default: nc
+          selector:
+            select:
+              mode: dropdown
+              options:
+              - label: No change
+                value: nc
+              - label: Full brightness
+                value: '0'
+              - label: Custom brightness (see Custom brightness level)
+                value: '1'
+              - label: Configured maximum brightness
+                value: '2'
+              - label: Double tap disabled
+                value: '3'
+              multiple: false
+              custom_value: false
+              sort: false
+        cfg_single_tap:
+          name: Single-tap upper paddle behavior
+          default: nc
+          selector:
+            select:
+              mode: dropdown
+              options:
+              - label: No change
+                value: nc
+              - label: Previous brightness
+                value: '0'
+              - label: Custom brightness (see Custom brightness level)
+                value: '1'
+              - label: Configured maximum brightness
+                value: '2'
+              - label: Full brightness
+                value: '3'
+              multiple: false
+              custom_value: false
+              sort: false
+        cfg_custom_brightness:
+          name: Custom brightness level (%)
+          description: -1 = no change. 0 = previous brightness. 1-99.
+          default: -1
+          selector:
+            number:
+              min: -1.0
+              max: 99.0
+              step: 1.0
+              mode: box
+              unit_of_measurement: '%'
+        cfg_local_dimming_speed:
+          name: Local dimming speed (seconds)
+          description: -1 = no change. 1-99 seconds for a full local hold-to-dim sweep.
+          default: -1
+          selector:
+            number:
+              min: -1.0
+              max: 99.0
+              step: 1.0
+              mode: box
+              unit_of_measurement: s
+        cfg_night_light:
+          name: Night light mode brightness (ZEN72/ZEN77 only, %)
+          description: -1 = no change. 0 = disabled. 1-99.
+          default: -1
+          selector:
+            number:
+              min: -1.0
+              max: 99.0
+              step: 1.0
+              mode: box
+              unit_of_measurement: '%'
+    stepped_dimming:
+      name: Stepped dimming
+      icon: mdi:stairs
+      collapsed: true
+      input:
+        step_enable:
+          name: Enable stepped dimming
+          description: Quantized paddle dimming between the levels below. Overrides
+            the hold/release paddle actions further down. Requires Scene Control =
+            Enable. Pick the style that matches the installation with the next setting.
+          default: false
+          selector:
+            boolean: {}
+        step_style:
+          name: Stepped dimming style
+          description: HOLD-STEP sends a discrete brightness step per pause interval
+            while the paddle is held; use it only when the switch does not locally
+            dim its own load (no-load or smart bulb mode), because local hold-dimming
+            overrides Z-Wave steps. RELEASE-SNAP lets the hardware hold-to-dim ramp
+            normally, then snaps brightness to the nearest step within the limits
+            when the paddle is released; use it on load-connected dimmers.
+          default: hold_step
+          selector:
+            select:
+              mode: dropdown
+              options:
+              - label: Hold-step (no load / smart bulb mode)
+                value: hold_step
+              - label: Release-snap (connected load)
+                value: release_snap
+              multiple: false
+              custom_value: false
+              sort: false
+        step_key_up:
+          name: Step-UP scene key
+          description: 'Scene key that steps brightness up (hold it in Hold-step style;
+            releasing it snaps in Release-snap style). ZEN7x - 001: upper paddle,
+            002: lower paddle. ZEN32 - 001-004: small buttons, 005: big button. ZEN35
+            - 001-004: small buttons, 005: dimmer paddle.'
+          default: '001'
+          selector:
+            select:
+              mode: dropdown
+              options:
+              - label: 001 (upper paddle / button 1)
+                value: '001'
+              - label: 002 (lower paddle / button 2)
+                value: '002'
+              - label: 003 (button 3)
+                value: '003'
+              - label: 004 (button 4)
+                value: '004'
+              - label: 005 (big button / dimmer paddle)
+                value: '005'
+              multiple: false
+              custom_value: false
+              sort: false
+        step_key_down:
+          name: Step-DOWN scene key
+          description: 'Scene key that steps brightness down. Same key map as above.
+            Setting this to the SAME key as step-UP gives one-button stepping: holding
+            steps DOWN while the light is on and UP while it is off.'
+          default: '002'
+          selector:
+            select:
+              mode: dropdown
+              options:
+              - label: 001 (upper paddle / button 1)
+                value: '001'
+              - label: 002 (lower paddle / button 2)
+                value: '002'
+              - label: 003 (button 3)
+                value: '003'
+              - label: 004 (button 4)
+                value: '004'
+              - label: 005 (big button / dimmer paddle)
+                value: '005'
+              multiple: false
+              custom_value: false
+              sort: false
+        step_target:
+          name: Light to step
+          description: Light (or light group) to dim. Leave empty to use the switch's
+            own light entity.
+          default: []
+          selector:
+            entity:
+              multiple: false
+              domain:
+              - light
+              reorder: false
+        step_pause_ms:
+          name: Pause per level (ms)
+          description: Time between brightness steps while the paddle is held.
+          default: 750
+          selector:
+            number:
+              min: 100.0
+              max: 5000.0
+              step: 50.0
+              mode: slider
+              unit_of_measurement: ms
+        step_size:
+          name: Step size (%)
+          default: 10
+          selector:
+            number:
+              min: 5.0
+              max: 50.0
+              step: 5.0
+              mode: slider
+              unit_of_measurement: '%'
+        step_floor:
+          name: Lowest level (%)
+          description: Stepping down stops here; stepping up from off starts here.
+          default: 20
+          selector:
+            number:
+              min: 1.0
+              max: 50.0
+              step: 1.0
+              mode: slider
+              unit_of_measurement: '%'
+        step_ceiling:
+          name: Highest level (%)
+          default: 100
+          selector:
+            number:
+              min: 50.0
+              max: 100.0
+              step: 1.0
+              mode: slider
+              unit_of_measurement: '%'
+    paddle_up:
+      name: Upper paddle actions (scene 001)
+      icon: mdi:arrow-up-bold-box
+      collapsed: true
+      input:
+        up_1x:
+          name: Upper paddle - tap 1x
+          default: []
+          selector:
+            action: {}
+        up_2x:
+          name: Upper paddle - tap 2x
+          default: []
+          selector:
+            action: {}
+        up_3x:
+          name: Upper paddle - tap 3x
+          default: []
+          selector:
+            action: {}
+        up_4x:
+          name: Upper paddle - tap 4x
+          default: []
+          selector:
+            action: {}
+        up_5x:
+          name: Upper paddle - tap 5x
+          default: []
+          selector:
+            action: {}
+        up_hold:
+          name: Upper paddle - hold
+          description: Ignored while stepped dimming is enabled.
+          default: []
+          selector:
+            action: {}
+        up_release:
+          name: Upper paddle - release
+          description: Ignored while stepped dimming is enabled.
+          default: []
+          selector:
+            action: {}
+    paddle_down:
+      name: Lower paddle actions (scene 002)
+      icon: mdi:arrow-down-bold-box
+      collapsed: true
+      input:
+        down_1x:
+          name: Lower paddle - tap 1x
+          default: []
+          selector:
+            action: {}
+        down_2x:
+          name: Lower paddle - tap 2x
+          default: []
+          selector:
+            action: {}
+        down_3x:
+          name: Lower paddle - tap 3x
+          default: []
+          selector:
+            action: {}
+        down_4x:
+          name: Lower paddle - tap 4x
+          default: []
+          selector:
+            action: {}
+        down_5x:
+          name: Lower paddle - tap 5x
+          default: []
+          selector:
+            action: {}
+        down_hold:
+          name: Lower paddle - hold
+          description: Ignored while stepped dimming is enabled.
+          default: []
+          selector:
+            action: {}
+        down_release:
+          name: Lower paddle - release
+          description: Ignored while stepped dimming is enabled.
+          default: []
+          selector:
+            action: {}
+    follow_section:
+      name: Follow light (LED / state mirror)
+      icon: mdi:link-variant
+      collapsed: true
+      input:
+        mirror_entity:
+          name: Follow this light
+          description: Optional. Keep this switch's on/off state (and therefore its
+            LED color) in step with the selected light, whatever turns that light
+            on or off. Use on a no-load ZEN7x that remotely controls a light wired
+            to another switch. Leave empty to disable.
+          default: ''
+          selector:
+            entity:
+              domain:
+              - light
+              - switch
+              multiple: false
+              reorder: false
+mode: parallel
+max: 10
+trigger_variables:
+  mirror_entity_tv: !input mirror_entity
+variables:
+  controller_id: !input zooz_switch
+  mirror_entity: !input mirror_entity
+  self_entity: '{{ (device_entities(controller_id) | select(''match'', ''light\.'')
+    | list + device_entities(controller_id) | select(''match'', ''switch\.'') | list)
+    | first | default('''') }}'
+  breaker_panel: !input breaker_panel
+  breaker_circuit: !input breaker_circuit
+  device_model: '{{ device_attr(controller_id, ''model'') or '''' }}'
+  model_key: '{% if ''ZEN71'' in device_model %}zen71
+
+    {%- elif ''ZEN72'' in device_model %}zen72
+
+    {%- elif ''ZEN76'' in device_model %}zen76
+
+    {%- elif ''ZEN77'' in device_model %}zen77
+
+    {%- elif ''ZEN32'' in device_model %}zen32
+
+    {%- elif ''ZEN35'' in device_model %}zen35
+
+    {%- else %}unknown{% endif %}'
+  device_fw_code: '{% set sw = (device_attr(controller_id, ''sw_version'') or ''0.0'')
+    | string %} {% set p = sw.split(''.'') %} {{ (p[0] | int(0)) * 100 + ((p[1] if
+    p | length > 1 else ''0'') | int(0)) }}'
+  led_scale_override: !input led_scale_override
+  led_scale_new: "{%- if led_scale_override == 'auto' -%}\n  {%- if model_key == 'zen32'
+    -%}{{ 330 <= device_fw_code | int(0) < 1000 }}\n  {%- elif model_key == 'zen35'
+    -%}{{ device_fw_code | int(0) >= 140 }}\n  {%- else -%}{{ false }}\n  {%- endif
+    -%}\n{%- else -%}{{ led_scale_override == 'new' }}\n{%- endif -%}"
+  is_extended_color: '{%- if model_key == ''zen35'' -%}{{ true }}
+
+    {%- elif model_key == ''zen32'' -%}{{ device_fw_code | int(0) >= 1040 or 210 <=
+    device_fw_code | int(0) < 1000 }}
+
+    {%- else -%}{{ false }}
+
+    {%- endif -%}'
+  param_map:
+    zen71:
+      orientation: 1
+      led_mode: 2
+      led_color: 14
+      led_brightness: 15
+      auto_off: 3
+      auto_on: 5
+      power_failure: 8
+      smart_mode: 11
+      scene_control: 9
+    zen72:
+      orientation: 1
+      led_mode: 2
+      led_color: 23
+      led_brightness: 24
+      auto_off: 3
+      auto_on: 5
+      power_failure: 8
+      smart_mode: 15
+      scene_control: 13
+      ramp_on_manual: 9
+      ramp_off_manual: 27
+      min_brightness: 10
+      max_brightness: 11
+      double_tap: 12
+      single_tap: 25
+      custom_brightness: 18
+      local_dimming_speed: 16
+      night_light: 22
+    zen76:
+      orientation: 1
+      led_mode: 2
+      led_color: 14
+      led_brightness: 15
+      auto_off: 3
+      auto_on: 5
+      power_failure: 8
+      smart_mode: 12
+      scene_control: 10
+    zen77:
+      orientation: 1
+      led_mode: 2
+      led_color: 23
+      led_brightness: 24
+      auto_off: 3
+      auto_on: 5
+      power_failure: 8
+      smart_mode: 15
+      scene_control: 13
+      ramp_on_manual: 9
+      ramp_off_manual: 27
+      min_brightness: 10
+      max_brightness: 11
+      double_tap: 12
+      single_tap: 25
+      custom_brightness: 18
+      local_dimming_speed: 16
+      night_light: 22
+      local_programming: 26
+      opposite_led: 37
+    zen32:
+      led_mode: 1
+      led_color: 6
+      led_brightness: 11
+      auto_off: 16
+      auto_on: 17
+      power_failure: 18
+      smart_mode: 19
+      scene_control: 24
+    zen35:
+      led_mode: 1
+      led_color: 6
+      led_brightness: 11
+      auto_off: 16
+      auto_on: 17
+      power_failure: 18
+      smart_mode: 19
+      scene_control: 36
+      ramp_on_manual: 21
+      ramp_off_manual: 22
+      min_brightness: 27
+      max_brightness: 28
+      double_tap: 29
+      single_tap: 30
+      custom_brightness: 31
+      local_dimming_speed: 23
+  color_fold_map:
+    '0': '0'
+    '1': '1'
+    '2': '2'
+    '3': '3'
+    '4': '3'
+    '5': '0'
+    '6': '1'
+  brightness_map_legacy:
+    '1': '2'
+    '2': '2'
+    '3': '2'
+    '4': '1'
+    '5': '1'
+    '6': '1'
+    '7': '1'
+    '8': '0'
+    '9': '0'
+    '10': '0'
+    low: '2'
+    medium: '1'
+    bright: '0'
+  brightness_map_new:
+    '1': '1'
+    '2': '2'
+    '3': '3'
+    '4': '4'
+    '5': '5'
+    '6': '6'
+    '7': '7'
+    '8': '8'
+    '9': '9'
+    '10': '10'
+    low: '3'
+    medium: '6'
+    bright: '10'
+  power_map_std:
+    'off': 0
+    'on': 1
+    previous: 2
+  power_map_zen32:
+    previous: 0
+    'off': 1
+    'on': 2
+  scene_map_std:
+    disable: 0
+    enable: 1
+  scene_map_zen32:
+    enable: 0
+    disable: 1
+  local_programming_map:
+    enable: 0
+    disable: 1
+  opposite_led_map:
+    'off': 0
+    white: 1
+    blue: 2
+    green: 3
+    red: 4
+  cfg_items:
+  - key: orientation
+    raw: !input cfg_orientation
+  - key: led_mode
+    raw: !input cfg_led_mode
+  - key: led_color
+    raw: !input cfg_led_color
+  - key: led_brightness
+    raw: !input cfg_led_brightness
+  - key: auto_off
+    raw: !input cfg_auto_off
+  - key: auto_on
+    raw: !input cfg_auto_on
+  - key: power_failure
+    raw: !input cfg_power_failure
+  - key: smart_mode
+    raw: !input cfg_smart_mode
+  - key: scene_control
+    raw: !input cfg_scene_control
+  - key: ramp_on_manual
+    raw: !input cfg_ramp_on_manual
+  - key: ramp_off_manual
+    raw: !input cfg_ramp_off_manual
+  - key: min_brightness
+    raw: !input cfg_min_brightness
+  - key: max_brightness
+    raw: !input cfg_max_brightness
+  - key: double_tap
+    raw: !input cfg_double_tap
+  - key: single_tap
+    raw: !input cfg_single_tap
+  - key: custom_brightness
+    raw: !input cfg_custom_brightness
+  - key: local_dimming_speed
+    raw: !input cfg_local_dimming_speed
+  - key: night_light
+    raw: !input cfg_night_light
+  - key: local_programming
+    raw: !input cfg_local_programming
+  - key: opposite_led
+    raw: !input cfg_opposite_led
+  step_enable: !input step_enable
+  step_style: !input step_style
+  step_key_up: !input step_key_up
+  step_key_down: !input step_key_down
+  step_target: !input step_target
+  step_size: !input step_size
+  step_floor: !input step_floor
+  step_ceiling: !input step_ceiling
+  step_target_resolved: "{% if step_target not in [none, '', []] %}\n  {{ step_target
+    }}\n{% else %}\n  {{ device_entities(controller_id) | select('match', 'light\\.')
+    | list\n     | first | default('') }}\n{% endif %}"
+triggers:
+- alias: ButtonPress
+  id: ButtonPress
+  trigger: event
+  event_type: zwave_js_value_notification
+  event_data:
+    device_id: !input zooz_switch
+    command_class_name: Central Scene
+- alias: HassStart
+  id: HassStart
+  trigger: homeassistant
+  event: start
+- alias: AutomationUpdate
+  id: AutomationUpdate
+  trigger: event
+  event_type: automation_reloaded
+- alias: Followed light changed
+  id: MirrorState
+  trigger: event
+  event_type: state_changed
+  event_data:
+    entity_id: !input mirror_entity
+  enabled: '{{ mirror_entity_tv not in [none, ''''] }}'
+actions:
+- choose:
+  - alias: Handle a button event
+    conditions: '{{ trigger.id == ''ButtonPress'' }}'
+    sequence:
+    - variables:
+        raw_v: '{{ trigger.event.data.value }}'
+        key: '{{ trigger.event.data.property_key_name }}'
+        value: "{% set m = {'0': 'KeyPressed', '1': 'KeyHeldDown',\n            '2':
+          'KeyReleased', '3': 'KeyPressed2x',\n            '4': 'KeyPressed3x', '5':
+          'KeyPressed4x',\n            '6': 'KeyPressed5x'} %}\n{{ m[raw_v | string]
+          if (raw_v | string) in m else raw_v }}"
+    - alias: Log the event when debug logging is on
+      enabled: !input debug_logging
+      action: logbook.log
+      data:
+        name: Zooz Smart Switch
+        message: '{{ device_model }} event: key {{ key }} - {{ value }}'
+    - choose:
+      - alias: 'Stepped dimming: hold the step-up key steps brightness up'
+        conditions: "{{ step_enable and step_style == 'hold_step'\n   and key == step_key_up
+          and value == 'KeyHeldDown'\n   and step_target_resolved != ''\n   and (step_key_up
+          != step_key_down\n        or not is_state(step_target_resolved, 'on')) }}"
+        sequence:
+        - variables:
+            cur_pct: "{% if is_state(step_target_resolved, 'on') %}\n  {{ ((state_attr(step_target_resolved,
+              'brightness')\n      | int(0)) / 255 * 100) | round(0) }}\n{% else %}\n
+              \ 0\n{% endif %}"
+            start_pct: "{% set r = ((cur_pct | int(0)) / step_size)\n   | round(0,
+              'common') * step_size %}\n{% if cur_pct | int(0) < step_floor | int
+              %}\n  {{ step_floor | int - step_size | int }}\n{% else %}\n  {{ r |
+              int }}\n{% endif %}"
+        - repeat:
+            sequence:
+            - variables:
+                tgt: "{{ [start_pct | int + repeat.index * step_size | int,\n    step_ceiling
+                  | int] | min }}"
+            - action: light.turn_on
+              continue_on_error: true
+              target:
+                entity_id: '{{ step_target_resolved }}'
+              data:
+                brightness_pct: '{{ tgt }}'
+                transition: 0
+            - wait_for_trigger:
+              - trigger: event
+                event_type: zwave_js_value_notification
+                event_data:
+                  device_id: !input zooz_switch
+                  command_class_name: Central Scene
+                  property_key_name: !input step_key_up
+              timeout:
+                milliseconds: !input step_pause_ms
+              continue_on_timeout: true
+            until: "{{ wait.trigger is not none\n   or [start_pct | int + repeat.index
+              * step_size | int,\n       step_ceiling | int] | min >= step_ceiling
+              | int\n   or repeat.index >= 25 }}"
+      - alias: 'Stepped dimming: hold the step-down key steps brightness down'
+        conditions: "{{ step_enable and step_style == 'hold_step'\n   and key == step_key_down
+          and value == 'KeyHeldDown'\n   and step_target_resolved != ''\n   and is_state(step_target_resolved,
+          'on') }}"
+        sequence:
+        - variables:
+            cur_pct: "{{ ((state_attr(step_target_resolved, 'brightness')\n    | int(0))
+              / 255 * 100) | round(0) }}"
+            start_pct: "{{ (((cur_pct | int(0)) / step_size)\n   | round(0, 'common')
+              * step_size) | int }}"
+        - repeat:
+            sequence:
+            - variables:
+                tgt: "{{ [start_pct | int - repeat.index * step_size | int,\n    step_floor
+                  | int] | max }}"
+            - action: light.turn_on
+              continue_on_error: true
+              target:
+                entity_id: '{{ step_target_resolved }}'
+              data:
+                brightness_pct: '{{ tgt }}'
+                transition: 0
+            - wait_for_trigger:
+              - trigger: event
+                event_type: zwave_js_value_notification
+                event_data:
+                  device_id: !input zooz_switch
+                  command_class_name: Central Scene
+                  property_key_name: !input step_key_down
+              timeout:
+                milliseconds: !input step_pause_ms
+              continue_on_timeout: true
+            until: "{{ wait.trigger is not none\n   or [start_pct | int - repeat.index
+              * step_size | int,\n       step_floor | int] | max <= step_floor | int\n
+              \  or repeat.index >= 25 }}"
+      - alias: 'Stepped dimming: snap to nearest step on release'
+        conditions: "{{ step_enable and step_style == 'release_snap'\n   and value
+          == 'KeyReleased'\n   and key in [step_key_up, step_key_down]\n   and step_target_resolved
+          != '' }}"
+        sequence:
+        - alias: Let the final hardware brightness report arrive
+          delay:
+            milliseconds: 300
+        - condition: template
+          value_template: '{{ is_state(step_target_resolved, ''on'') }}'
+        - variables:
+            cur_pct: "{{ ((state_attr(step_target_resolved, 'brightness')\n    | int(0))
+              / 255 * 100) | round(0) }}"
+            snap_pct: "{{ [[(((cur_pct | int(0)) / step_size)\n      | round(0, 'common')
+              * step_size) | int,\n     step_floor | int] | max,\n    step_ceiling
+              | int] | min }}"
+        - action: light.turn_on
+          continue_on_error: true
+          target:
+            entity_id: '{{ step_target_resolved }}'
+          data:
+            brightness_pct: '{{ snap_pct }}'
+            transition: 0
+      - conditions: '{{ key == ''001'' and value == ''KeyPressed'' }}'
+        sequence: !input up_1x
+      - conditions: '{{ key == ''001'' and value == ''KeyPressed2x'' }}'
+        sequence: !input up_2x
+      - conditions: '{{ key == ''001'' and value == ''KeyPressed3x'' }}'
+        sequence: !input up_3x
+      - conditions: '{{ key == ''001'' and value == ''KeyPressed4x'' }}'
+        sequence: !input up_4x
+      - conditions: '{{ key == ''001'' and value == ''KeyPressed5x'' }}'
+        sequence: !input up_5x
+      - conditions: "{{ key == '001' and value == 'KeyHeldDown'\n   and not step_enable
+          }}"
+        sequence: !input up_hold
+      - conditions: "{{ key == '001' and value == 'KeyReleased'\n   and not step_enable
+          }}"
+        sequence: !input up_release
+      - conditions: '{{ key == ''002'' and value == ''KeyPressed'' }}'
+        sequence: !input down_1x
+      - conditions: '{{ key == ''002'' and value == ''KeyPressed2x'' }}'
+        sequence: !input down_2x
+      - conditions: '{{ key == ''002'' and value == ''KeyPressed3x'' }}'
+        sequence: !input down_3x
+      - conditions: '{{ key == ''002'' and value == ''KeyPressed4x'' }}'
+        sequence: !input down_4x
+      - conditions: '{{ key == ''002'' and value == ''KeyPressed5x'' }}'
+        sequence: !input down_5x
+      - conditions: "{{ key == '002' and value == 'KeyHeldDown'\n   and not step_enable
+          }}"
+        sequence: !input down_hold
+      - conditions: "{{ key == '002' and value == 'KeyReleased'\n   and not step_enable
+          }}"
+        sequence: !input down_release
+  - alias: Follow light - mirror its on/off state onto this switch
+    conditions: '{{ trigger.id == ''MirrorState'' and mirror_entity not in [none,
+      ''''] and self_entity != '''' and trigger.event.data.new_state is not none and
+      trigger.event.data.new_state.state in [''on'', ''off''] and (trigger.event.data.old_state
+      is none or trigger.event.data.old_state.state != trigger.event.data.new_state.state)
+      and not is_state(self_entity, trigger.event.data.new_state.state) }}'
+    sequence:
+    - variables:
+        target_state: '{{ trigger.event.data.new_state.state }}'
+    - if:
+      - condition: template
+        value_template: '{{ target_state == ''on'' }}'
+      then:
+      - action: homeassistant.turn_on
+        continue_on_error: true
+        target:
+          entity_id: '{{ self_entity }}'
+      else:
+      - action: homeassistant.turn_off
+        continue_on_error: true
+        target:
+          entity_id: '{{ self_entity }}'
+    - alias: Log the mirror action when debug logging is on
+      enabled: !input debug_logging
+      action: logbook.log
+      data:
+        name: Zooz Smart Switch
+        message: '{{ device_model }}: followed {{ mirror_entity }} -> {{ target_state
+          }}'
+  - alias: Apply configuration parameters to the switch
+    conditions: "{{ trigger.id == 'HassStart'\n   or (trigger.id == 'AutomationUpdate'
+      and this is defined\n       and (as_timestamp(now())\n            - as_timestamp(this.last_changed,
+      0)) < 15) }}"
+    sequence:
+    - alias: Give the Z-Wave network time to come up after a restart
+      if:
+      - condition: template
+        value_template: '{{ trigger.id == ''HassStart'' }}'
+      then:
+      - delay: 00:01:00
+    - variables:
+        model_params: '{{ param_map.get(model_key, {}) }}'
+        pending: "{{ cfg_items\n   | selectattr('key', 'in', model_params.keys() |
+          list)\n   | rejectattr('raw', 'in', ['nc', -1, '-1', -1.0])\n   | list }}"
+    - repeat:
+        for_each: '{{ pending }}'
+        sequence:
+        - variables:
+            item_key: '{{ repeat.item.key }}'
+            item_raw: '{{ repeat.item.raw }}'
+            item_param: '{{ model_params[item_key] }}'
+            item_value: "{% if item_key == 'led_color' %}\n  {% if is_extended_color
+              %}\n    {{ item_raw | int }}\n  {% else %}\n    {{ color_fold_map[item_raw
+              | string] | int }}\n  {% endif %}\n{% elif item_key == 'led_brightness'
+              %}\n  {{ (brightness_map_new if led_scale_new\n      else brightness_map_legacy)[item_raw
+              | string]\n     | int }}\n{% elif item_key == 'power_failure' %}\n  {{
+              (power_map_zen32 if model_key == 'zen32'\n      else power_map_std)[item_raw
+              | string] | int }}\n{% elif item_key == 'scene_control' %}\n  {{ (scene_map_zen32
+              if model_key == 'zen32'\n      else scene_map_std)[item_raw | string]
+              | int }}\n{% elif item_key == 'local_programming' %}\n  {{ local_programming_map[item_raw
+              | string] | int }}\n{% elif item_key == 'opposite_led' %}\n  {{ opposite_led_map[item_raw
+              | string] | int }}\n{% else %}\n  {{ item_raw | int }}\n{% endif %}"
+        - action: zwave_js.set_config_parameter
+          continue_on_error: true
+          data:
+            parameter: '{{ item_param }}'
+            value: '{{ item_value | int }}'
+          target:
+            device_id: '{{ controller_id }}'
+        - delay:
+            milliseconds: 300
+    - alias: Log applied settings when debug logging is on
+      enabled: !input debug_logging
+      action: logbook.log
+      data:
+        name: Zooz Smart Switch
+        message: "Applied {{ pending | length }} configuration parameter(s) to {{
+          device_model }} ({{ model_key }}){{\n  ' [panel ' ~ breaker_panel ~ ', breaker
+          ' ~ breaker_circuit\n  ~ ']' if breaker_panel or breaker_circuit else ''
+          }}."
+    - alias: Follow light - re-sync this switch to the followed light
+      if:
+      - condition: template
+        value_template: '{{ mirror_entity not in [none, ''''] and self_entity != ''''
+          and states(mirror_entity) in [''on'', ''off''] and not is_state(self_entity,
+          states(mirror_entity)) }}'
+      then:
+      - if:
+        - condition: template
+          value_template: '{{ is_state(mirror_entity, ''on'') }}'
+        then:
+        - action: homeassistant.turn_on
+          continue_on_error: true
+          target:
+            entity_id: '{{ self_entity }}'
+        else:
+        - action: homeassistant.turn_off
+          continue_on_error: true
+          target:
+            entity_id: '{{ self_entity }}'
