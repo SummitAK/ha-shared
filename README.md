@@ -62,3 +62,10 @@ and the two sites' configurations are not identical.
 - **`System` label** (grey, `mdi:server`, same at both sites) marks infrastructure:
   OS/Core/Supervisor/Host, Backup, apps, radio controllers, network gear,
   Marketplace/HACS items and software integrations (AI, TTS, MCP, HomeKit bridge).
+- **Site labels** `Arizona` (orange) and `Hawaii` (indigo) exist at both sites.
+- **Shared Ecobee account:** both Home Assistants see all nine Ecobee devices. Every
+  Ecobee device is named with its site prefix (`AZ ...` / `HI ...`) identically at both
+  sites and carries its site label. At each site, the other site's Ecobee devices are
+  disabled and have no area.
+- **Per-site cloud accounts:** iAqualink and Tesla (Teslemetry) are integrated only at
+  the site they serve.
