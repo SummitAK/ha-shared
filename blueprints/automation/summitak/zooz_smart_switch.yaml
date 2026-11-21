@@ -1,5 +1,5 @@
 blueprint:
-  name: Zooz Smart Switch Suite (ZEN71/72/76/77/32/35) v0.5.0
+  name: Zooz Smart Switch Suite (ZEN71/72/76/77/32/35) v0.6.0
   description: 'One blueprint to configure and automate Zooz Z-Wave switches: ZEN71/ZEN76
     (on/off), ZEN72/ZEN77 (dimmers), ZEN32/ZEN35 (scene controllers).
 
@@ -36,7 +36,24 @@ blueprint:
 
 
     Parameter maps verified against the Z-Wave JS device database (zwave-js config
-    files for ZEN71/72/76/77/32/35, Oct 2026). **Version:** 0.5.0
+    files for ZEN71/72/76/77/32/35, Oct 2026). **Version:** 0.6.0
+
+
+    **v0.6.0:** Direct links (Z-Wave association) - optional. List the lights this
+    switch should control directly, switch to switch, so its paddles keep working
+    if Home Assistant is down. On save and 60 s after Home Assistant starts, the
+    switch''s association group is written: group 3 (dimming) on ZEN72/ZEN77,
+    group 2 (on/off) on ZEN71/ZEN76; ZEN32/ZEN35 need the group set explicitly.
+    For a two-way (virtual 3-way) pair, each switch''s automation lists the other.
+    Links can only be added or removed (Home Assistant cannot read the groups back),
+    so to drop a link move it to "Remove direct links to". Group 1 (Lifeline) is
+    never touched, parameter 7 is never changed, and Long Range nodes (node ID 256
+    and up) are skipped because Long Range does not support switch-to-switch links.
+    Every link change is written to the Logbook. Use HA scene actions only for
+    what the direct link cannot do (2x-5x taps, other lights); a warning is logged
+    if a 1x or hold action targets a directly linked light, because the light would
+    get two commands. In the Z-Wave JS panel, use Groups > Refresh (force query)
+    to see the result; the panel''s cached view does not update on its own.
 
 
     **v0.5.0:** Follow light (LED/state mirror) - optional. Pick the light this switch
@@ -806,6 +823,59 @@ blueprint:
               - switch
               multiple: false
               reorder: false
+    direct_link_section:
+      name: Direct links (Z-Wave association)
+      icon: mdi:transit-connection-variant
+      collapsed: true
+      input:
+        direct_link_targets:
+          name: Directly control these lights
+          description: Optional. Z-Wave lights (or light-like switches) this switch
+            controls directly, without Home Assistant, written to its association
+            group on save and at startup. For a two-way pair, list each switch in
+            the other's automation. Long Range nodes are skipped. Leave empty to leave
+            the switch's groups alone (default).
+          default: []
+          selector:
+            entity:
+              filter:
+              - integration: zwave_js
+                domain:
+                - light
+                - switch
+              - integration: switch_as_x
+                domain: light
+              multiple: true
+              reorder: false
+        direct_link_remove:
+          name: Remove direct links to
+          description: Optional. Lights to remove from this switch's association
+            group on save and at startup. Home Assistant cannot read the groups back,
+            so a link is only removed when it is listed here.
+          default: []
+          selector:
+            entity:
+              filter:
+              - integration: zwave_js
+                domain:
+                - light
+                - switch
+              - integration: switch_as_x
+                domain: light
+              multiple: true
+              reorder: false
+        direct_link_group:
+          name: Association group
+          description: 0 = automatic (group 3 dimming on ZEN72/ZEN77, group 2 on/off
+            on ZEN71/ZEN76). ZEN32/ZEN35 have one group per button, so set the group
+            number from the Zooz manual. Group 1 (Lifeline) is never written.
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 20
+              step: 1
+              mode: box
 mode: parallel
 max: 10
 trigger_variables:
@@ -1046,6 +1116,40 @@ variables:
   step_target_resolved: "{% if step_target not in [none, '', []] %}\n  {{ step_target
     }}\n{% else %}\n  {{ device_entities(controller_id) | select('match', 'light\\.')
     | list\n     | first | default('') }}\n{% endif %}"
+  direct_link_targets: !input direct_link_targets
+  direct_link_remove: !input direct_link_remove
+  direct_link_group_in: !input direct_link_group
+  link_paddle_actions:
+    up_1x: !input up_1x
+    down_1x: !input down_1x
+    up_hold: !input up_hold
+    down_hold: !input down_hold
+  self_node: "{% set ns = namespace(n=0) %}{% for i in device_attr(controller_id,
+    'identifiers') | default([], true) %}{% if i[0] == 'zwave_js' and i[1] is match('^\\d+-\\d+$')
+    %}{% set ns.n = i[1].split('-')[1] | int(0) %}{% endif %}{% endfor %}{{ ns.n }}"
+  link_group: "{% set g = direct_link_group_in | int(0) %}{% if g >= 2 %}{{ g }}{%
+    elif model_key in ['zen72', 'zen77'] %}3{% elif model_key in ['zen71', 'zen76']
+    %}2{% else %}0{% endif %}"
+  link_add_nodes: "{% set ns = namespace(n=[]) %}{% for e in (direct_link_targets
+    if direct_link_targets is list else [direct_link_targets]) | reject('in', [none,
+    '']) %}{% set d = device_id(e) %}{% if d %}{% for i in device_attr(d, 'identifiers')
+    | default([], true) %}{% if i[0] == 'zwave_js' and i[1] is match('^\\d+-\\d+$')
+    %}{% set ns.n = ns.n + [i[1].split('-')[1] | int(0)] %}{% endif %}{% endfor %}{%
+    endif %}{% endfor %}{{ ns.n | unique | reject('eq', self_node | int) | reject('eq',
+    0) | list }}"
+  link_remove_nodes: "{% set ns = namespace(n=[]) %}{% for e in (direct_link_remove
+    if direct_link_remove is list else [direct_link_remove]) | reject('in', [none,
+    '']) %}{% set d = device_id(e) %}{% if d %}{% for i in device_attr(d, 'identifiers')
+    | default([], true) %}{% if i[0] == 'zwave_js' and i[1] is match('^\\d+-\\d+$')
+    %}{% set ns.n = ns.n + [i[1].split('-')[1] | int(0)] %}{% endif %}{% endfor %}{%
+    endif %}{% endfor %}{{ ns.n | unique | reject('in', link_add_nodes) | reject('eq',
+    0) | list }}"
+  link_lr_skipped: '{{ (link_add_nodes + link_remove_nodes) | select(''ge'', 256)
+    | list if self_node | int < 256 else link_add_nodes + link_remove_nodes }}'
+  link_dup_entities: "{% set txt = (link_paddle_actions | string) ~ ' ' ~ (step_target_resolved
+    if step_enable else '') %}{{ (direct_link_targets if direct_link_targets is list
+    else [direct_link_targets]) | reject('in', [none, '']) | select('in', txt) | list
+    }}"
 triggers:
 - alias: ButtonPress
   id: ButtonPress
@@ -1296,6 +1400,71 @@ actions:
           device_model }} ({{ model_key }}){{\n  ' [panel ' ~ breaker_panel ~ ', breaker
           ' ~ breaker_circuit\n  ~ ']' if breaker_panel or breaker_circuit else ''
           }}."
+    - alias: Direct links - write this switch's association group
+      if:
+      - condition: template
+        value_template: '{{ (link_add_nodes | length > 0 or link_remove_nodes | length
+          > 0 or link_lr_skipped | length > 0) }}'
+      then:
+      - variables:
+          add_ok: '{{ link_add_nodes | reject(''in'', link_lr_skipped) | list }}'
+          remove_ok: '{{ link_remove_nodes | reject(''in'', link_lr_skipped) | list
+            }}'
+      - if:
+        - condition: template
+          value_template: '{{ link_group | int(0) < 2 }}'
+        then:
+        - action: logbook.log
+          data:
+            name: Zooz Smart Switch
+            message: 'Direct links NOT written on {{ device_model }} (node {{ self_node
+              }}): set the association group number for this model.'
+          continue_on_error: true
+      - alias: Remove listed links first
+        if:
+        - condition: template
+          value_template: '{{ link_group | int(0) >= 2 and remove_ok | length > 0
+            }}'
+        then:
+        - action: zwave_js.invoke_cc_api
+          continue_on_error: true
+          target:
+            device_id: '{{ controller_id }}'
+          data:
+            command_class: 133
+            method_name: removeNodeIds
+            parameters:
+            - groupId: '{{ link_group | int }}'
+              nodeIds: '{{ remove_ok }}'
+        - delay:
+            milliseconds: 500
+      - alias: Add listed links (re-adding an existing link is harmless)
+        if:
+        - condition: template
+          value_template: '{{ link_group | int(0) >= 2 and add_ok | length > 0 }}'
+        then:
+        - action: zwave_js.invoke_cc_api
+          continue_on_error: true
+          target:
+            device_id: '{{ controller_id }}'
+          data:
+            command_class: 133
+            method_name: addNodeIds
+            parameters: '{{ [link_group | int] + add_ok }}'
+      - if:
+        - condition: template
+          value_template: '{{ link_group | int(0) >= 2 }}'
+        then:
+        - action: logbook.log
+          continue_on_error: true
+          data:
+            name: Zooz Smart Switch
+            message: "Direct links on {{ device_model }} (node {{ self_node }}), group
+              {{ link_group }}: linked {{ add_ok if add_ok else 'none' }}{{ '; removed
+              ' ~ remove_ok if remove_ok else '' }}{{ '; skipped Long Range ' ~ link_lr_skipped
+              if link_lr_skipped else '' }}{{ '; WARNING: 1x/hold or stepped actions
+              also target ' ~ (link_dup_entities | join(', ')) ~ ', so it gets two commands'
+              if link_dup_entities else '' }}."
     - alias: Follow light - re-sync this switch to the followed light
       if:
       - condition: template
