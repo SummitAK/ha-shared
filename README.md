@@ -57,6 +57,14 @@ and the two sites' configurations are not identical.
 - Zooz switch breaker panel/circuit is recorded in each Smart Switch Suite automation,
   not in entity or device names.
 - No-load (REM/NL) switch entities are kept off dashboards.
+- **Zooz direct links (virtual 3-way):** Z-Wave associations between switches are
+  recorded in each switch's Smart Switch Suite automation (v0.6.0+, "Direct links"),
+  never set by hand in the Z-Wave JS panel. Each switch of a pair lists the other.
+  The blueprint writes group 3 on ZEN72/77 and group 2 on ZEN71/76, never touches
+  group 1 or parameter 7, and skips Long Range nodes (ID 256+). Home Assistant cannot
+  read groups back, so removal goes through "Remove direct links to". Verify with
+  Z-Wave JS panel > device > Groups > Refresh (force query). HA scene actions on a
+  linked switch handle only what the link cannot (2x-5x taps, other lights).
 - **Areas are physical rooms only.** Software-only devices and integrations get no area.
   Hub hardware (HA Green, ZWA-2, network gear) goes in the room it physically sits in.
 - **`System` label** (grey, `mdi:server`, same at both sites) marks infrastructure:
