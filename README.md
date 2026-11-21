@@ -16,7 +16,7 @@ local copy under `blueprints/automation/local/` that is refreshed from here.
 blueprints/automation/summitak/
   lighting_guard.yaml               Lighting Guard (dusk/dawn, daylight sweep, max on-time, occupancy, failsafes)
   zooz_smart_switch.yaml            Zooz Smart Switch Suite (ZEN71/72/76/77/32/35 config + paddle actions)
-  ZEN32-control-track-fix1.yaml     ZEN32/ZEN35 scene controller with LED tracking (local fork of rwalker777)
+  zen32_scene_controller.yaml       ZEN32/ZEN35 scene controller: 5-button actions + LED tracking (fork of rwalker777)
   hvac_door_open_protection.yaml    HVAC door-open AC lockout (Ecobee) - HI only for now
 dashboards/
   az/lights-control.json            AZ "Lights" dashboard (storage-mode config)
@@ -29,6 +29,11 @@ can pull updates with its built-in **Re-import blueprint** command.
 ## Updating a blueprint
 
 1. Edit the file here (or ask Claude to) and bump the version in its description.
+   Versioning convention: file names never carry a version or "fix" label (renaming
+   a file means re-pointing every automation that uses it). The version lives in the
+   blueprint's name (`... v1.3.1`) and in a `**Version:**` line, with a
+   `**vX.Y.Z:**` changelog entry per release, newest first. Bump the patch number
+   for fixes and wording, the minor number for new features or changed behavior.
 2. Commit to `main`.
 3. At **each** site: Settings -> Automations & Scenes -> Blueprints -> the blueprint's
    menu (three dots) -> **Re-import blueprint**. Every automation using it reloads
