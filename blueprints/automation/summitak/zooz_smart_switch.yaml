@@ -1,5 +1,5 @@
 blueprint:
-  name: Zooz Smart Switch Suite (ZEN71/72/76/77/32/35) v0.6.1
+  name: Zooz Smart Switch Suite (ZEN71/72/76/77/32/35) v0.7.0-beta.2 BETA
   description: 'One blueprint to configure and automate Zooz Z-Wave switches: ZEN71/ZEN76
     (on/off), ZEN72/ZEN77 (dimmers), ZEN32/ZEN35 (scene controllers).
 
@@ -17,9 +17,12 @@ blueprint:
     that only support 4 colors (all ZEN7x) the extended colors fold to the nearest
     supported color; on 0-2 brightness firmware the 1-10 scale folds to Low/Medium/Bright.
 
-    - Paddle scene actions: tap 1x-5x, hold, and release actions for the upper (001)
-    and lower (002) paddles. On ZEN32/35 these keys are small buttons 1 and 2; full
-    5-button support stays in the ZEN32 LED-tracking blueprint for now.
+    - Paddle and button scene actions: tap 1x-5x, hold, and release actions for the
+    upper (001) and lower (002) paddles, and on ZEN32/ZEN35 for every button (001-004
+    small buttons, 005 big button / ZEN35 dimmer paddle, 006 ZEN32 3-way input).
+
+    - ZEN32/ZEN35 LED tracking (v0.7.0): each button LED can follow any entity, with
+    its own color and brightness for on, off and unavailable, plus a night mode.
 
     - **Stepped dimming**: an optional mode that replaces hold-to-ramp with discrete
     steps - hold the upper paddle to step brightness UP in configurable increments
@@ -36,7 +39,29 @@ blueprint:
 
 
     Parameter maps verified against the Z-Wave JS device database (zwave-js config
-    files for ZEN71/72/76/77/32/35, Oct 2026). **Version:** 0.6.1
+    files for ZEN71/72/76/77/32/35, Oct 2026). **Version:** 0.7.0-beta.2 (BETA - test
+    install only; production automations stay on 0.6.x until this is promoted)
+
+
+    **v0.7.0-beta.2:** Brings in the v0.6.1 production change (opposite-state LED
+    color on all ZEN7x).
+
+
+    **v0.7.0-beta.1:** Merges the ZEN32/ZEN35 Scene Controller blueprint (v1.3.1)
+    into the Suite so each scene controller is configured in one automation. New
+    for ZEN32/ZEN35: actions for buttons 3, 4, 5 (big button / ZEN35 dimmer paddle)
+    and 6 (ZEN32 3-way input); per-button LED tracking (entity, on/off/unavailable
+    color and brightness) with night mode and "turn off untracked LEDs"; the "Disabled
+    load behavior" setting (parameter 20). Input names for LED tracking and night mode
+    match the scene controller blueprint, so its automations migrate by copying
+    those values. When the big button''s LED tracks an entity, the LED indicator mode,
+    color and brightness settings are not written to that LED (tracking owns it).
+    Changes for all models: hold/release actions are only suppressed on the keys
+    that stepped dimming actually uses (previously keys 001/002 whenever stepped
+    dimming was on); configuration writes now wait (up to 2 minutes) until the switch
+    is actually reachable - the Z-Wave JS entry is loaded and the switch''s own light/switch
+    entity has a real state - instead of trusting restored entity states, which let
+    writes fail with "No zwave_js nodes found" after a Z-Wave JS restart.
 
 
     **v0.6.1:** Opposite-state LED color now works on every ZEN7x (parameter 21
@@ -127,7 +152,7 @@ blueprint:
 
     '
   domain: automation
-  source_url: https://github.com/SummitAK/ha-shared/blob/main/blueprints/automation/summitak/zooz_smart_switch.yaml
+  source_url: https://github.com/SummitAK/ha-shared/blob/beta/blueprints/automation/summitak/zooz_smart_switch.yaml
   author: Brendan McKee
   homeassistant:
     min_version: 2024.10.0
@@ -248,9 +273,10 @@ blueprint:
         cfg_led_mode:
           name: LED indicator mode
           description: When the LED is lit. On ZEN32/ZEN35 this applies to the big
-            relay/dimmer button. Default (v0.4.0) is "On when load is off" - set "No
-            change" explicitly on non-ZEN77 switches that should keep their current
-            setting.
+            relay/dimmer button, and is not written while that LED tracks an entity
+            (LED tracking - big button). Default (v0.4.0) is "On when load is off" -
+            set "No change" explicitly on non-ZEN77 switches that should keep their
+            current setting.
           default: '0'
           selector:
             select:
@@ -274,8 +300,9 @@ blueprint:
           description: Extended colors (Magenta/Yellow/Cyan) are supported on ZEN32
             (firmware 2.10+) and ZEN35. On ZEN7x they fold to the nearest supported
             color (Magenta to Red, Yellow to White, Cyan to Blue). On ZEN32/ZEN35
-            this sets the big-button LED. Default (v0.4.0) is Green - set "No change"
-            explicitly on non-ZEN77 switches that should keep their current setting.
+            this sets the big-button LED unless that LED tracks an entity. Default
+            (v0.4.0) is Green - set "No change" explicitly on non-ZEN77 switches that
+            should keep their current setting.
           default: '2'
           selector:
             select:
@@ -434,6 +461,27 @@ blueprint:
                 value: '1'
               - label: Local and Z-Wave control disabled
                 value: '2'
+              multiple: false
+              custom_value: false
+              sort: false
+        cfg_disabled_load_behavior:
+          name: Disabled load behavior (ZEN32/ZEN35 only)
+          description: Parameter 20. What the big button does while its local control
+            is disabled (smart bulb mode). Report and toggle LED keeps status reports
+            and the LED changing; Do nothing stops both. On a scene-only ZEN32 big
+            button, "Do nothing" has been seen to mute its scene events too, so use
+            Report and toggle LED there. Ignored on other models.
+          default: nc
+          selector:
+            select:
+              mode: dropdown
+              options:
+              - label: No change
+                value: nc
+              - label: Report and toggle LED
+                value: '0'
+              - label: Do nothing
+                value: '1'
               multiple: false
               custom_value: false
               sort: false
@@ -732,7 +780,7 @@ blueprint:
               mode: slider
               unit_of_measurement: '%'
     paddle_up:
-      name: Upper paddle actions (scene 001)
+      name: Upper paddle / ZEN32-35 button 1 actions (scene 001)
       icon: mdi:arrow-up-bold-box
       collapsed: true
       input:
@@ -763,18 +811,18 @@ blueprint:
             action: {}
         up_hold:
           name: Upper paddle - hold
-          description: Ignored while stepped dimming is enabled.
+          description: Ignored while stepped dimming uses this key.
           default: []
           selector:
             action: {}
         up_release:
           name: Upper paddle - release
-          description: Ignored while stepped dimming is enabled.
+          description: Ignored while stepped dimming uses this key.
           default: []
           selector:
             action: {}
     paddle_down:
-      name: Lower paddle actions (scene 002)
+      name: Lower paddle / ZEN32-35 button 2 actions (scene 002)
       icon: mdi:arrow-down-bold-box
       collapsed: true
       input:
@@ -805,16 +853,660 @@ blueprint:
             action: {}
         down_hold:
           name: Lower paddle - hold
-          description: Ignored while stepped dimming is enabled.
+          description: Ignored while stepped dimming uses this key.
           default: []
           selector:
             action: {}
         down_release:
           name: Lower paddle - release
-          description: Ignored while stepped dimming is enabled.
+          description: Ignored while stepped dimming uses this key.
           default: []
           selector:
             action: {}
+    button3_actions:
+      name: ZEN32/ZEN35 button 3 actions (scene 003)
+      icon: mdi:numeric-3-box
+      collapsed: true
+      input:
+        button3_1x:
+          name: Button 3 - tap 1x
+          default: []
+          selector:
+            action: {}
+        button3_2x:
+          name: Button 3 - tap 2x
+          default: []
+          selector:
+            action: {}
+        button3_3x:
+          name: Button 3 - tap 3x
+          default: []
+          selector:
+            action: {}
+        button3_4x:
+          name: Button 3 - tap 4x
+          default: []
+          selector:
+            action: {}
+        button3_5x:
+          name: Button 3 - tap 5x
+          default: []
+          selector:
+            action: {}
+        button3_hold:
+          name: Button 3 - hold
+          description: Ignored while stepped dimming uses this key.
+          default: []
+          selector:
+            action: {}
+        button3_release:
+          name: Button 3 - release
+          description: Ignored while stepped dimming uses this key.
+          default: []
+          selector:
+            action: {}
+    button4_actions:
+      name: ZEN32/ZEN35 button 4 actions (scene 004)
+      icon: mdi:numeric-4-box
+      collapsed: true
+      input:
+        button4_1x:
+          name: Button 4 - tap 1x
+          default: []
+          selector:
+            action: {}
+        button4_2x:
+          name: Button 4 - tap 2x
+          default: []
+          selector:
+            action: {}
+        button4_3x:
+          name: Button 4 - tap 3x
+          default: []
+          selector:
+            action: {}
+        button4_4x:
+          name: Button 4 - tap 4x
+          default: []
+          selector:
+            action: {}
+        button4_5x:
+          name: Button 4 - tap 5x
+          default: []
+          selector:
+            action: {}
+        button4_hold:
+          name: Button 4 - hold
+          description: Ignored while stepped dimming uses this key.
+          default: []
+          selector:
+            action: {}
+        button4_release:
+          name: Button 4 - release
+          description: Ignored while stepped dimming uses this key.
+          default: []
+          selector:
+            action: {}
+    button5_actions:
+      name: ZEN32 big button / ZEN35 dimmer paddle actions (scene 005)
+      icon: mdi:checkbox-blank
+      collapsed: true
+      input:
+        button5_1x:
+          name: Big button - tap 1x
+          default: []
+          selector:
+            action: {}
+        button5_2x:
+          name: Big button - tap 2x
+          default: []
+          selector:
+            action: {}
+        button5_3x:
+          name: Big button - tap 3x
+          default: []
+          selector:
+            action: {}
+        button5_4x:
+          name: Big button - tap 4x
+          default: []
+          selector:
+            action: {}
+        button5_5x:
+          name: Big button - tap 5x
+          default: []
+          selector:
+            action: {}
+        button5_hold:
+          name: Big button - hold
+          description: Ignored while stepped dimming uses this key.
+          default: []
+          selector:
+            action: {}
+        button5_release:
+          name: Big button - release
+          description: Ignored while stepped dimming uses this key.
+          default: []
+          selector:
+            action: {}
+    button6_actions:
+      name: ZEN32 3-way input actions (scene 006)
+      icon: mdi:light-switch-off
+      collapsed: true
+      input:
+        button6_1x:
+          name: 3-way input - tap 1x
+          description: The 3-way input reports scenes only when it is set to momentary
+            and the ZEN32 is 800 series or 700 series firmware 10.40+.
+          default: []
+          selector:
+            action: {}
+        button6_2x:
+          name: 3-way input - tap 2x
+          default: []
+          selector:
+            action: {}
+        button6_3x:
+          name: 3-way input - tap 3x
+          default: []
+          selector:
+            action: {}
+        button6_4x:
+          name: 3-way input - tap 4x
+          default: []
+          selector:
+            action: {}
+        button6_5x:
+          name: 3-way input - tap 5x
+          default: []
+          selector:
+            action: {}
+        button6_hold:
+          name: 3-way input - hold
+          default: []
+          selector:
+            action: {}
+        button6_release:
+          name: 3-way input - release
+          default: []
+          selector:
+            action: {}
+    led_track_0:
+      name: LED tracking - Big button (button 5) / ZEN35 dimmer paddle (ZEN32/ZEN35 only)
+      icon: mdi:checkbox-blank-outline
+      collapsed: true
+      input:
+        input_entity0:
+          name: Entity for the big button LED
+          description: Choose an entity for this LED to follow. Leave empty to not track. While set, the LED indicator mode, color and brightness settings (Switch configuration - all models) are not written to this LED.
+          default: []
+          selector: &led_track_entity
+            entity:
+              multiple: false
+              domain:
+              - alarm_control_panel
+              - automation
+              - binary_sensor
+              - climate
+              - cover
+              - device_tracker
+              - fan
+              - humidifier
+              - input_boolean
+              - light
+              - lock
+              - media_player
+              - person
+              - schedule
+              - script
+              - sensor
+              - siren
+              - switch
+              - timer
+              - update
+              - valve
+              reorder: false
+        off_state0:
+          name: Big button LED when the entity is off
+          description: LED behavior when the entity is off, closed, disarmed or locked.
+          default: '99'
+          selector: &led_track_state
+            select:
+              mode: dropdown
+              options:
+              - label: Always off
+                value: '2'
+              - label: Always on
+                value: '3'
+              - label: On during daytime (off at night)
+                value: '99'
+              multiple: false
+              custom_value: false
+              sort: false
+        off_color0:
+          name: Big button LED color when off
+          description: Default white.
+          default: '0'
+          selector: &led_track_color
+            select:
+              mode: dropdown
+              options:
+              - label: White
+                value: '0'
+              - label: Blue
+                value: '1'
+              - label: Green
+                value: '2'
+              - label: Red
+                value: '3'
+              - label: Magenta
+                value: '4'
+              - label: Yellow
+                value: '5'
+              - label: Cyan
+                value: '6'
+              multiple: false
+              custom_value: false
+              sort: false
+        off_brightness0:
+          name: Big button LED brightness when off
+          description: 1-10 on new firmware; folded to Low/Medium/Bright on legacy firmware.
+          default: medium
+          selector: &led_track_brightness
+            select:
+              mode: dropdown
+              options:
+              - label: 1 (dimmest)
+                value: '1'
+              - label: '2'
+                value: '2'
+              - label: '3'
+                value: '3'
+              - label: '4'
+                value: '4'
+              - label: '5'
+                value: '5'
+              - label: '6'
+                value: '6'
+              - label: '7'
+                value: '7'
+              - label: '8'
+                value: '8'
+              - label: '9'
+                value: '9'
+              - label: 10 (brightest)
+                value: '10'
+              - label: Low preset (3 / legacy Low)
+                value: low
+              - label: Medium preset (6 / legacy Medium)
+                value: medium
+              - label: Bright preset (10 / legacy Bright)
+                value: bright
+              multiple: false
+              custom_value: false
+              sort: false
+        on_state0:
+          name: Big button LED when the entity is on
+          description: LED behavior when the entity is on, open, armed or unlocked.
+          default: '3'
+          selector: *led_track_state
+        on_color0:
+          name: Big button LED color when on
+          description: Default blue.
+          default: '1'
+          selector: *led_track_color
+        on_brightness0:
+          name: Big button LED brightness when on
+          description: 1-10 on new firmware; folded to Low/Medium/Bright on legacy firmware.
+          default: medium
+          selector: *led_track_brightness
+        unavail_state0:
+          name: Big button LED when the entity is unavailable
+          description: LED behavior when the entity is unavailable.
+          default: '3'
+          selector: *led_track_state
+        unavail_color0:
+          name: Big button LED color when unavailable
+          description: Default red.
+          default: '3'
+          selector: *led_track_color
+        unavail_brightness0:
+          name: Big button LED brightness when unavailable
+          description: 1-10 on new firmware; folded to Low/Medium/Bright on legacy firmware.
+          default: medium
+          selector: *led_track_brightness
+    led_track_1:
+      name: LED tracking - Button 1 (top left) (ZEN32/ZEN35 only)
+      icon: mdi:numeric-1-box-outline
+      collapsed: true
+      input:
+        input_entity1:
+          name: Entity for the button 1 LED
+          description: Choose an entity for this LED to follow. Leave empty to not track.
+          default: []
+          selector: *led_track_entity
+        off_state1:
+          name: Button 1 LED when the entity is off
+          description: LED behavior when the entity is off, closed, disarmed or locked.
+          default: '99'
+          selector: *led_track_state
+        off_color1:
+          name: Button 1 LED color when off
+          description: Default white.
+          default: '0'
+          selector: *led_track_color
+        off_brightness1:
+          name: Button 1 LED brightness when off
+          description: 1-10 on new firmware; folded to Low/Medium/Bright on legacy firmware.
+          default: medium
+          selector: *led_track_brightness
+        on_state1:
+          name: Button 1 LED when the entity is on
+          description: LED behavior when the entity is on, open, armed or unlocked.
+          default: '3'
+          selector: *led_track_state
+        on_color1:
+          name: Button 1 LED color when on
+          description: Default green.
+          default: '2'
+          selector: *led_track_color
+        on_brightness1:
+          name: Button 1 LED brightness when on
+          description: 1-10 on new firmware; folded to Low/Medium/Bright on legacy firmware.
+          default: medium
+          selector: *led_track_brightness
+        unavail_state1:
+          name: Button 1 LED when the entity is unavailable
+          description: LED behavior when the entity is unavailable.
+          default: '3'
+          selector: *led_track_state
+        unavail_color1:
+          name: Button 1 LED color when unavailable
+          description: Default red.
+          default: '3'
+          selector: *led_track_color
+        unavail_brightness1:
+          name: Button 1 LED brightness when unavailable
+          description: 1-10 on new firmware; folded to Low/Medium/Bright on legacy firmware.
+          default: medium
+          selector: *led_track_brightness
+    led_track_2:
+      name: LED tracking - Button 2 (top right) (ZEN32/ZEN35 only)
+      icon: mdi:numeric-2-box-outline
+      collapsed: true
+      input:
+        input_entity2:
+          name: Entity for the button 2 LED
+          description: Choose an entity for this LED to follow. Leave empty to not track.
+          default: []
+          selector: *led_track_entity
+        off_state2:
+          name: Button 2 LED when the entity is off
+          description: LED behavior when the entity is off, closed, disarmed or locked.
+          default: '99'
+          selector: *led_track_state
+        off_color2:
+          name: Button 2 LED color when off
+          description: Default white.
+          default: '0'
+          selector: *led_track_color
+        off_brightness2:
+          name: Button 2 LED brightness when off
+          description: 1-10 on new firmware; folded to Low/Medium/Bright on legacy firmware.
+          default: medium
+          selector: *led_track_brightness
+        on_state2:
+          name: Button 2 LED when the entity is on
+          description: LED behavior when the entity is on, open, armed or unlocked.
+          default: '3'
+          selector: *led_track_state
+        on_color2:
+          name: Button 2 LED color when on
+          description: Default green.
+          default: '2'
+          selector: *led_track_color
+        on_brightness2:
+          name: Button 2 LED brightness when on
+          description: 1-10 on new firmware; folded to Low/Medium/Bright on legacy firmware.
+          default: medium
+          selector: *led_track_brightness
+        unavail_state2:
+          name: Button 2 LED when the entity is unavailable
+          description: LED behavior when the entity is unavailable.
+          default: '3'
+          selector: *led_track_state
+        unavail_color2:
+          name: Button 2 LED color when unavailable
+          description: Default red.
+          default: '3'
+          selector: *led_track_color
+        unavail_brightness2:
+          name: Button 2 LED brightness when unavailable
+          description: 1-10 on new firmware; folded to Low/Medium/Bright on legacy firmware.
+          default: medium
+          selector: *led_track_brightness
+    led_track_3:
+      name: LED tracking - Button 3 (bottom left) (ZEN32/ZEN35 only)
+      icon: mdi:numeric-3-box-outline
+      collapsed: true
+      input:
+        input_entity3:
+          name: Entity for the button 3 LED
+          description: Choose an entity for this LED to follow. Leave empty to not track.
+          default: []
+          selector: *led_track_entity
+        off_state3:
+          name: Button 3 LED when the entity is off
+          description: LED behavior when the entity is off, closed, disarmed or locked.
+          default: '99'
+          selector: *led_track_state
+        off_color3:
+          name: Button 3 LED color when off
+          description: Default white.
+          default: '0'
+          selector: *led_track_color
+        off_brightness3:
+          name: Button 3 LED brightness when off
+          description: 1-10 on new firmware; folded to Low/Medium/Bright on legacy firmware.
+          default: medium
+          selector: *led_track_brightness
+        on_state3:
+          name: Button 3 LED when the entity is on
+          description: LED behavior when the entity is on, open, armed or unlocked.
+          default: '3'
+          selector: *led_track_state
+        on_color3:
+          name: Button 3 LED color when on
+          description: Default green.
+          default: '2'
+          selector: *led_track_color
+        on_brightness3:
+          name: Button 3 LED brightness when on
+          description: 1-10 on new firmware; folded to Low/Medium/Bright on legacy firmware.
+          default: medium
+          selector: *led_track_brightness
+        unavail_state3:
+          name: Button 3 LED when the entity is unavailable
+          description: LED behavior when the entity is unavailable.
+          default: '3'
+          selector: *led_track_state
+        unavail_color3:
+          name: Button 3 LED color when unavailable
+          description: Default red.
+          default: '3'
+          selector: *led_track_color
+        unavail_brightness3:
+          name: Button 3 LED brightness when unavailable
+          description: 1-10 on new firmware; folded to Low/Medium/Bright on legacy firmware.
+          default: medium
+          selector: *led_track_brightness
+    led_track_4:
+      name: LED tracking - Button 4 (bottom right) (ZEN32/ZEN35 only)
+      icon: mdi:numeric-4-box-outline
+      collapsed: true
+      input:
+        input_entity4:
+          name: Entity for the button 4 LED
+          description: Choose an entity for this LED to follow. Leave empty to not track.
+          default: []
+          selector: *led_track_entity
+        off_state4:
+          name: Button 4 LED when the entity is off
+          description: LED behavior when the entity is off, closed, disarmed or locked.
+          default: '99'
+          selector: *led_track_state
+        off_color4:
+          name: Button 4 LED color when off
+          description: Default white.
+          default: '0'
+          selector: *led_track_color
+        off_brightness4:
+          name: Button 4 LED brightness when off
+          description: 1-10 on new firmware; folded to Low/Medium/Bright on legacy firmware.
+          default: medium
+          selector: *led_track_brightness
+        on_state4:
+          name: Button 4 LED when the entity is on
+          description: LED behavior when the entity is on, open, armed or unlocked.
+          default: '3'
+          selector: *led_track_state
+        on_color4:
+          name: Button 4 LED color when on
+          description: Default green.
+          default: '2'
+          selector: *led_track_color
+        on_brightness4:
+          name: Button 4 LED brightness when on
+          description: 1-10 on new firmware; folded to Low/Medium/Bright on legacy firmware.
+          default: medium
+          selector: *led_track_brightness
+        unavail_state4:
+          name: Button 4 LED when the entity is unavailable
+          description: LED behavior when the entity is unavailable.
+          default: '3'
+          selector: *led_track_state
+        unavail_color4:
+          name: Button 4 LED color when unavailable
+          description: Default red.
+          default: '3'
+          selector: *led_track_color
+        unavail_brightness4:
+          name: Button 4 LED brightness when unavailable
+          description: 1-10 on new firmware; folded to Low/Medium/Bright on legacy firmware.
+          default: medium
+          selector: *led_track_brightness
+    led_track_night:
+      name: LED tracking - night mode and untracked LEDs (ZEN32/ZEN35 only)
+      icon: mdi:weather-night
+      collapsed: true
+      input:
+        turn_off_untracked:
+          name: Turn off untracked small-button LEDs
+          description: When on, small buttons (1-4) with no tracked entity have their
+            LEDs set to Always off. The big button is governed by the LED indicator
+            settings when it is not tracking an entity.
+          default: false
+          selector:
+            boolean: {}
+        night_entity:
+          name: Night entity (optional)
+          description: A toggle, binary_sensor, sensor or sun entity. Night is when it
+            is on, below_horizon, true or night. When set, it replaces the start and
+            stop times below.
+          default: []
+          selector:
+            entity:
+              multiple: false
+              domain:
+              - binary_sensor
+              - input_boolean
+              - sensor
+              - sun
+              reorder: false
+        invert_night_entity:
+          name: Invert the night entity
+          description: Use when the entity above means daytime instead of night.
+          default: false
+          selector:
+            boolean: {}
+        schedule_start:
+          name: Night starts at (when no night entity)
+          description: Leave start and stop both at 00:00:00 to disable night mode.
+          default: 00:00:00
+          selector:
+            time: {}
+        schedule_stop:
+          name: Night ends at (when no night entity)
+          default: 00:00:00
+          selector:
+            time: {}
+        night_led_brightness:
+          name: Night LED brightness
+          description: Overrides tracked-LED brightness at night. 1-10 on new firmware;
+            folded to Low/Medium/Bright on legacy firmware.
+          default: '99'
+          selector:
+            select:
+              mode: dropdown
+              options:
+              - label: No change
+                value: '99'
+              - label: 1 (dimmest)
+                value: '1'
+              - label: '2'
+                value: '2'
+              - label: '3'
+                value: '3'
+              - label: '4'
+                value: '4'
+              - label: '5'
+                value: '5'
+              - label: '6'
+                value: '6'
+              - label: '7'
+                value: '7'
+              - label: '8'
+                value: '8'
+              - label: '9'
+                value: '9'
+              - label: 10 (brightest)
+                value: '10'
+              - label: Low preset (3 / legacy Low)
+                value: low
+              - label: Medium preset (6 / legacy Medium)
+                value: medium
+              - label: Bright preset (10 / legacy Bright)
+                value: bright
+              multiple: false
+              custom_value: false
+              sort: false
+        night_led_color:
+          name: Night LED color
+          description: Overrides tracked-LED color at night.
+          default: '99'
+          selector:
+            select:
+              mode: dropdown
+              options:
+              - label: No change
+                value: '99'
+              - label: White
+                value: '0'
+              - label: Blue
+                value: '1'
+              - label: Green
+                value: '2'
+              - label: Red
+                value: '3'
+              - label: Magenta
+                value: '4'
+              - label: Yellow
+                value: '5'
+              - label: Cyan
+                value: '6'
+              multiple: false
+              custom_value: false
+              sort: false
     follow_section:
       name: Follow light (LED / state mirror)
       icon: mdi:link-variant
@@ -893,6 +1585,67 @@ mode: parallel
 max: 10
 trigger_variables:
   mirror_entity_tv: !input mirror_entity
+  schedule_start: !input schedule_start
+  schedule_stop: !input schedule_stop
+  night_entity: !input night_entity
+  schedule_set: '{{ night_entity not in [none, '''', []] or schedule_start != schedule_stop
+    }}'
+  inputs:
+  - button_id: 0
+    off_state: !input off_state0
+    off_color: !input off_color0
+    off_brightness: !input off_brightness0
+    on_state: !input on_state0
+    on_color: !input on_color0
+    on_brightness: !input on_brightness0
+    unavail_state: !input unavail_state0
+    unavail_color: !input unavail_color0
+    unavail_brightness: !input unavail_brightness0
+    trigger_entity: !input input_entity0
+  - button_id: 1
+    off_state: !input off_state1
+    off_color: !input off_color1
+    off_brightness: !input off_brightness1
+    on_state: !input on_state1
+    on_color: !input on_color1
+    on_brightness: !input on_brightness1
+    unavail_state: !input unavail_state1
+    unavail_color: !input unavail_color1
+    unavail_brightness: !input unavail_brightness1
+    trigger_entity: !input input_entity1
+  - button_id: 2
+    off_state: !input off_state2
+    off_color: !input off_color2
+    off_brightness: !input off_brightness2
+    on_state: !input on_state2
+    on_color: !input on_color2
+    on_brightness: !input on_brightness2
+    unavail_state: !input unavail_state2
+    unavail_color: !input unavail_color2
+    unavail_brightness: !input unavail_brightness2
+    trigger_entity: !input input_entity2
+  - button_id: 3
+    off_state: !input off_state3
+    off_color: !input off_color3
+    off_brightness: !input off_brightness3
+    on_state: !input on_state3
+    on_color: !input on_color3
+    on_brightness: !input on_brightness3
+    unavail_state: !input unavail_state3
+    unavail_color: !input unavail_color3
+    unavail_brightness: !input unavail_brightness3
+    trigger_entity: !input input_entity3
+  - button_id: 4
+    off_state: !input off_state4
+    off_color: !input off_color4
+    off_brightness: !input off_brightness4
+    on_state: !input on_state4
+    on_color: !input on_color4
+    on_brightness: !input on_brightness4
+    unavail_state: !input unavail_state4
+    unavail_color: !input unavail_color4
+    unavail_brightness: !input unavail_brightness4
+    trigger_entity: !input input_entity4
 variables:
   controller_id: !input zooz_switch
   mirror_entity: !input mirror_entity
@@ -1169,6 +1922,78 @@ variables:
     if step_enable else '') %}{{ (direct_link_targets if direct_link_targets is list
     else [direct_link_targets]) | reject('in', [none, '']) | select('in', txt) | list
     }}"
+  is_scene_ctl: "{{ model_key in ['zen32', 'zen35'] }}"
+  big_tracked: "{{ is_scene_ctl and inputs[0].trigger_entity not in [none, '', []] }}"
+  led_skip_keys: "{{ ['led_mode', 'led_color', 'led_brightness'] if big_tracked else
+    [] }}"
+  cfg_p20: !input cfg_disabled_load_behavior
+  brightness_map: '{{ brightness_map_new if led_scale_new else brightness_map_legacy
+    }}'
+  toggle_offset: 1
+  color_offset: 6
+  brightness_offset: 11
+  night_led_brightness_input: !input night_led_brightness
+  night_brightness_override: '{{ (night_led_brightness_input | string) != ''99'' }}'
+  night_led_brightness: '{{ brightness_map.get(night_led_brightness_input | string,
+    brightness_map[''medium'']) }}'
+  night_led_color: !input night_led_color
+  invert_night_entity: !input invert_night_entity
+  turn_off_untracked: !input turn_off_untracked
+  on_states:
+  - 'on'
+  - open
+  - opening
+  - 'true'
+  - 'True'
+  - true
+  - playing
+  - heat
+  - cold
+  - dry
+  - armed_home
+  - armed_away
+  - armed_vacation
+  - armed_night
+  - armed_custom_bypass
+  - triggered
+  - pending
+  - arming
+  - unlocked
+  - 1
+  - home
+  - active
+  off_states:
+  - 'off'
+  - closed
+  - closing
+  - 'false'
+  - 'False'
+  - false
+  - standby
+  - paused
+  - idle
+  - disarmed
+  - disarming
+  - locked
+  - not_home
+  - away
+  night_states:
+  - 'on'
+  - below_horizon
+  - 'True'
+  - 'true'
+  - night
+  - Night
+  valid_buttons: '{{ inputs | rejectattr(''trigger_entity'', ''in'', [none, '''',
+    []]) | list if is_scene_ctl else [] }}'
+  untracked_buttons: '{{ inputs | selectattr(''trigger_entity'', ''in'', [none, '''',
+    []]) | rejectattr(''button_id'', ''eq'', 0) | list if is_scene_ctl else [] }}'
+  in_nighttime: "{% if night_entity not in [none, '', []] %}\n  {% set is_night =
+    states(night_entity) in night_states %}\n  {{ not is_night if invert_night_entity
+    else is_night }}\n{% else %}\n  {% set time_now = (now() + timedelta(seconds=2)).strftime('%H:%M:%S')
+    %}\n  {% if schedule_start < schedule_stop %}\n    {{ schedule_set and (schedule_start
+    <= time_now < schedule_stop) }}\n  {% else %}\n    {{ schedule_set and (schedule_start
+    <= time_now or time_now < schedule_stop) }}\n  {% endif %}\n{% endif %}\n"
 triggers:
 - alias: ButtonPress
   id: ButtonPress
@@ -1192,6 +2017,46 @@ triggers:
   event_data:
     entity_id: !input mirror_entity
   enabled: '{{ mirror_entity_tv not in [none, ''''] }}'
+- alias: Night entity changed
+  id: EntityToggle
+  trigger: state
+  entity_id: !input night_entity
+  enabled: '{{ night_entity not in [none, '''', []] }}'
+- alias: NightTime
+  id: NightTime
+  trigger: time
+  at: !input schedule_start
+  enabled: '{{ night_entity in [none, '''', []] and schedule_set }}'
+- alias: DayTime
+  id: DayTime
+  trigger: time
+  at: !input schedule_stop
+  enabled: '{{ night_entity in [none, '''', []] and schedule_set }}'
+- alias: '0'
+  id: StateTrigger
+  trigger: state
+  entity_id: !input input_entity0
+  enabled: '{{ inputs[0].trigger_entity not in [none, '''', []] }}'
+- alias: '1'
+  id: StateTrigger
+  trigger: state
+  entity_id: !input input_entity1
+  enabled: '{{ inputs[1].trigger_entity not in [none, '''', []] }}'
+- alias: '2'
+  id: StateTrigger
+  trigger: state
+  entity_id: !input input_entity2
+  enabled: '{{ inputs[2].trigger_entity not in [none, '''', []] }}'
+- alias: '3'
+  id: StateTrigger
+  trigger: state
+  entity_id: !input input_entity3
+  enabled: '{{ inputs[3].trigger_entity not in [none, '''', []] }}'
+- alias: '4'
+  id: StateTrigger
+  trigger: state
+  entity_id: !input input_entity4
+  enabled: '{{ inputs[4].trigger_entity not in [none, '''', []] }}'
 actions:
 - choose:
   - alias: Handle a button event
@@ -1317,10 +2182,10 @@ actions:
         sequence: !input up_4x
       - conditions: '{{ key == ''001'' and value == ''KeyPressed5x'' }}'
         sequence: !input up_5x
-      - conditions: "{{ key == '001' and value == 'KeyHeldDown'\n   and not step_enable
+      - conditions: "{{ key == '001' and value == 'KeyHeldDown'\n   and not (step_enable and key in [step_key_up, step_key_down])
           }}"
         sequence: !input up_hold
-      - conditions: "{{ key == '001' and value == 'KeyReleased'\n   and not step_enable
+      - conditions: "{{ key == '001' and value == 'KeyReleased'\n   and not (step_enable and key in [step_key_up, step_key_down])
           }}"
         sequence: !input up_release
       - conditions: '{{ key == ''002'' and value == ''KeyPressed'' }}'
@@ -1333,12 +2198,260 @@ actions:
         sequence: !input down_4x
       - conditions: '{{ key == ''002'' and value == ''KeyPressed5x'' }}'
         sequence: !input down_5x
-      - conditions: "{{ key == '002' and value == 'KeyHeldDown'\n   and not step_enable
+      - conditions: "{{ key == '002' and value == 'KeyHeldDown'\n   and not (step_enable and key in [step_key_up, step_key_down])
           }}"
         sequence: !input down_hold
-      - conditions: "{{ key == '002' and value == 'KeyReleased'\n   and not step_enable
+      - conditions: "{{ key == '002' and value == 'KeyReleased'\n   and not (step_enable and key in [step_key_up, step_key_down])
           }}"
         sequence: !input down_release
+      - conditions: '{{ key == ''003'' and value == ''KeyPressed'' }}'
+        sequence: !input button3_1x
+      - conditions: '{{ key == ''003'' and value == ''KeyPressed2x'' }}'
+        sequence: !input button3_2x
+      - conditions: '{{ key == ''003'' and value == ''KeyPressed3x'' }}'
+        sequence: !input button3_3x
+      - conditions: '{{ key == ''003'' and value == ''KeyPressed4x'' }}'
+        sequence: !input button3_4x
+      - conditions: '{{ key == ''003'' and value == ''KeyPressed5x'' }}'
+        sequence: !input button3_5x
+      - conditions: "{{ key == '003' and value == 'KeyHeldDown'\n   and not (step_enable and key in [step_key_up, step_key_down])
+          }}"
+        sequence: !input button3_hold
+      - conditions: "{{ key == '003' and value == 'KeyReleased'\n   and not (step_enable and key in [step_key_up, step_key_down])
+          }}"
+        sequence: !input button3_release
+      - conditions: '{{ key == ''004'' and value == ''KeyPressed'' }}'
+        sequence: !input button4_1x
+      - conditions: '{{ key == ''004'' and value == ''KeyPressed2x'' }}'
+        sequence: !input button4_2x
+      - conditions: '{{ key == ''004'' and value == ''KeyPressed3x'' }}'
+        sequence: !input button4_3x
+      - conditions: '{{ key == ''004'' and value == ''KeyPressed4x'' }}'
+        sequence: !input button4_4x
+      - conditions: '{{ key == ''004'' and value == ''KeyPressed5x'' }}'
+        sequence: !input button4_5x
+      - conditions: "{{ key == '004' and value == 'KeyHeldDown'\n   and not (step_enable and key in [step_key_up, step_key_down])
+          }}"
+        sequence: !input button4_hold
+      - conditions: "{{ key == '004' and value == 'KeyReleased'\n   and not (step_enable and key in [step_key_up, step_key_down])
+          }}"
+        sequence: !input button4_release
+      - conditions: '{{ key == ''005'' and value == ''KeyPressed'' }}'
+        sequence: !input button5_1x
+      - conditions: '{{ key == ''005'' and value == ''KeyPressed2x'' }}'
+        sequence: !input button5_2x
+      - conditions: '{{ key == ''005'' and value == ''KeyPressed3x'' }}'
+        sequence: !input button5_3x
+      - conditions: '{{ key == ''005'' and value == ''KeyPressed4x'' }}'
+        sequence: !input button5_4x
+      - conditions: '{{ key == ''005'' and value == ''KeyPressed5x'' }}'
+        sequence: !input button5_5x
+      - conditions: "{{ key == '005' and value == 'KeyHeldDown'\n   and not (step_enable and key in [step_key_up, step_key_down])
+          }}"
+        sequence: !input button5_hold
+      - conditions: "{{ key == '005' and value == 'KeyReleased'\n   and not (step_enable and key in [step_key_up, step_key_down])
+          }}"
+        sequence: !input button5_release
+      - conditions: '{{ key == ''006'' and value == ''KeyPressed'' }}'
+        sequence: !input button6_1x
+      - conditions: '{{ key == ''006'' and value == ''KeyPressed2x'' }}'
+        sequence: !input button6_2x
+      - conditions: '{{ key == ''006'' and value == ''KeyPressed3x'' }}'
+        sequence: !input button6_3x
+      - conditions: '{{ key == ''006'' and value == ''KeyPressed4x'' }}'
+        sequence: !input button6_4x
+      - conditions: '{{ key == ''006'' and value == ''KeyPressed5x'' }}'
+        sequence: !input button6_5x
+      - conditions: '{{ key == ''006'' and value == ''KeyHeldDown'' }}'
+        sequence: !input button6_hold
+      - conditions: '{{ key == ''006'' and value == ''KeyReleased'' }}'
+        sequence: !input button6_release
+  - alias: LED tracking - a tracked entity changed (ZEN32/ZEN35)
+    conditions: "{{ trigger.id == 'StateTrigger' and is_scene_ctl\n   and trigger.to_state
+      is not none\n   and (trigger.from_state is none\n        or trigger.to_state.state
+      != trigger.from_state.state) }}"
+    sequence:
+    - alias: Let rapid toggles settle, then use the entity's current state
+      delay:
+        milliseconds: 250
+    - &controller_ready
+      alias: Wait until the switch is reachable (stop quietly if it never is)
+      sequence:
+      - wait_template: "{{ (device_attr(controller_id, 'config_entries') | default([],
+          true) | list\n    | map('config_entry_attr', 'state') | map('string')\n    |
+          select('eq', 'loaded') | list | count > 0)\n   and (self_entity == ''\n        or
+          states(self_entity) not in ['unavailable', 'unknown']) }}"
+        timeout: 00:02:00
+        continue_on_timeout: true
+      - if:
+        - condition: template
+          value_template: '{{ not wait.completed }}'
+        then:
+        - action: logbook.log
+          continue_on_error: true
+          data:
+            name: Zooz Smart Switch
+            message: '{{ device_model }} was not reachable for 2 minutes; nothing was
+              written.'
+        - stop: Switch not reachable
+    - variables:
+        current: '{{ inputs[trigger.alias | int] }}'
+        target_state: '{{ states(current.trigger_entity) }}'
+        prev_state: '{{ trigger.from_state.state if trigger.from_state is not none
+          else ''unknown'' }}'
+    - variables: &led_vars
+        map_b_off: '{{ brightness_map.get(current.off_brightness | string, brightness_map[''medium''])
+          }}'
+        map_b_on: '{{ brightness_map.get(current.on_brightness | string, brightness_map[''medium''])
+          }}'
+        map_b_unavail: '{{ brightness_map.get(current.unavail_brightness | string,
+          brightness_map[''medium'']) }}'
+        led_cond: "{% if target_state in off_states %}\n  {{ dict(state=current.off_state,
+          color=current.off_color, brightness=map_b_off) }}\n{% elif target_state
+          in on_states %}\n  {{ dict(state=current.on_state, color=current.on_color,
+          brightness=map_b_on) }}\n{% elif target_state == \"unavailable\" %}\n  {{
+          dict(state=current.unavail_state, color=current.unavail_color, brightness=map_b_unavail)
+          }}\n{% else %}\n  {{ dict(state=None, color=None, brightness=None) }}\n{%
+          endif %}\n"
+        parameter:
+          toggle: '{{ current.button_id | int + toggle_offset | int }}'
+          color: '{{ current.button_id | int + color_offset | int }}'
+          brightness: '{{ current.button_id | int + brightness_offset | int }}'
+    - variables:
+        prev_cond: "{% if prev_state in off_states %}\n  {{ dict(state=current.off_state,
+          color=current.off_color, brightness=map_b_off) }}\n{% elif prev_state in
+          on_states %}\n  {{ dict(state=current.on_state, color=current.on_color,
+          brightness=map_b_on) }}\n{% elif prev_state == \"unavailable\" %}\n  {{
+          dict(state=current.unavail_state, color=current.unavail_color, brightness=map_b_unavail)
+          }}\n{% else %}\n  {{ dict(state=None, color=None, brightness=None) }}\n{%
+          endif %}\n"
+        night_active: '{{ (schedule_set and in_nighttime) | bool }}'
+    - variables:
+        want: "{% set c = led_cond %} {{ dict(\n     toggle=((('2' if night_active
+          else '3') if (c.state | string) == '99' else c.state) | string),\n     color=((night_led_color
+          if ((night_led_color | string) != '99' and night_active) else c.color) |
+          string),\n     brightness=((night_led_brightness if (night_brightness_override
+          and night_active) else c.brightness) | string)) }}\n"
+        had: "{% set c = prev_cond %} {% if c.state is none %}\n  {{ dict(toggle='none',
+          color='none', brightness='none') }}\n{% else %}\n  {{ dict(\n       toggle=((('2'
+          if night_active else '3') if (c.state | string) == '99' else c.state) |
+          string),\n       color=((night_led_color if ((night_led_color | string)
+          != '99' and night_active) else c.color) | string),\n       brightness=((night_led_brightness
+          if (night_brightness_override and night_active) else c.brightness) | string))
+          }}\n{% endif %}\n"
+    - alias: Write only the LED parameters that changed
+      if:
+      - condition: template
+        value_template: '{{ led_cond.state is not none }}'
+      then:
+      - if:
+        - condition: template
+          value_template: '{{ had.toggle != want.toggle }}'
+        then:
+        - action: zwave_js.set_config_parameter
+          continue_on_error: true
+          data:
+            parameter: '{{ parameter.toggle }}'
+            value: '{{ want.toggle }}'
+          target:
+            device_id: '{{ controller_id }}'
+        - delay:
+            milliseconds: 300
+      - if:
+        - condition: template
+          value_template: '{{ had.color != want.color }}'
+        then:
+        - action: zwave_js.set_config_parameter
+          continue_on_error: true
+          data:
+            parameter: '{{ parameter.color }}'
+            value: '{{ want.color }}'
+          target:
+            device_id: '{{ controller_id }}'
+        - delay:
+            milliseconds: 300
+      - if:
+        - condition: template
+          value_template: '{{ had.brightness != want.brightness }}'
+        then:
+        - action: zwave_js.set_config_parameter
+          continue_on_error: true
+          data:
+            parameter: '{{ parameter.brightness }}'
+            value: '{{ want.brightness }}'
+          target:
+            device_id: '{{ controller_id }}'
+  - alias: LED tracking - night started or ended (ZEN32/ZEN35)
+    conditions: "{{ is_scene_ctl and (\n  (trigger.id in ['NightTime', 'DayTime'] and
+      schedule_set) or\n  (trigger.id == 'EntityToggle' and schedule_set\n   and trigger.to_state
+      is not none\n   and (trigger.from_state is none\n        or trigger.to_state.state
+      != trigger.from_state.state))) }}"
+    sequence:
+    - *controller_ready
+    - &untracked_off
+      alias: Turn off untracked small-button LEDs
+      if:
+      - condition: template
+        value_template: '{{ turn_off_untracked and untracked_buttons | length > 0
+          }}'
+      then:
+      - repeat:
+          for_each: '{{ untracked_buttons }}'
+          sequence:
+          - action: zwave_js.set_config_parameter
+            continue_on_error: true
+            data:
+              parameter: '{{ repeat.item.button_id | int + toggle_offset | int }}'
+              value: 2
+            target:
+              device_id: '{{ controller_id }}'
+          - delay:
+              milliseconds: 300
+    - &led_refresh
+      alias: Refresh every tracked LED
+      repeat:
+        for_each: '{{ valid_buttons }}'
+        sequence:
+        - variables:
+            current: '{{ repeat.item }}'
+            target_state: '{{ states(repeat.item.trigger_entity) }}'
+        - variables: *led_vars
+        - if:
+          - condition: template
+            value_template: '{{ led_cond.state is not none }}'
+          then:
+          - action: zwave_js.set_config_parameter
+            continue_on_error: true
+            data:
+              parameter: '{{ parameter.toggle }}'
+              value: "{% if (led_cond.state | string) == '99' %}\n  {{ '2' if schedule_set
+                and in_nighttime else '3' }}\n{% else %}\n  {{ led_cond.state }}\n{%
+                endif %}\n"
+            target:
+              device_id: '{{ controller_id }}'
+          - delay:
+              milliseconds: 300
+          - action: zwave_js.set_config_parameter
+            continue_on_error: true
+            data:
+              parameter: '{{ parameter.color }}'
+              value: "{% if (night_led_color | string) != '99' and in_nighttime and schedule_set
+                %}\n  {{ night_led_color }}\n{% else %}\n  {{ led_cond.color }}\n{%
+                endif %}\n"
+            target:
+              device_id: '{{ controller_id }}'
+          - delay:
+              milliseconds: 300
+          - action: zwave_js.set_config_parameter
+            continue_on_error: true
+            data:
+              parameter: '{{ parameter.brightness }}'
+              value: '{{ night_led_brightness if (night_brightness_override and in_nighttime
+                and schedule_set) else led_cond.brightness }}'
+            target:
+              device_id: '{{ controller_id }}'
+        - delay:
+            milliseconds: 300
   - alias: Follow light - mirror its on/off state onto this switch
     conditions: '{{ trigger.id == ''MirrorState'' and mirror_entity not in [none,
       ''''] and self_entity != '''' and trigger.event.data.new_state is not none and
@@ -1379,10 +2492,12 @@ actions:
         value_template: '{{ trigger.id == ''HassStart'' }}'
       then:
       - delay: 00:01:00
+    - *controller_ready
     - variables:
         model_params: '{{ param_map.get(model_key, {}) }}'
         pending: "{{ cfg_items\n   | selectattr('key', 'in', model_params.keys() |
-          list)\n   | rejectattr('raw', 'in', ['nc', -1, '-1', -1.0])\n   | list }}"
+          list)\n   | rejectattr('raw', 'in', ['nc', -1, '-1', -1.0])\n   | rejectattr('key',
+          'in', led_skip_keys)\n   | list }}"
     - repeat:
         for_each: '{{ pending }}'
         sequence:
@@ -1419,6 +2534,26 @@ actions:
           device_model }} ({{ model_key }}){{\n  ' [panel ' ~ breaker_panel ~ ', breaker
           ' ~ breaker_circuit\n  ~ ']' if breaker_panel or breaker_circuit else ''
           }}."
+    - alias: ZEN32/ZEN35 - disabled load behavior, untracked LEDs and tracked LEDs
+      if:
+      - condition: template
+        value_template: '{{ is_scene_ctl }}'
+      then:
+      - if:
+        - condition: template
+          value_template: '{{ cfg_p20 != ''nc'' }}'
+        then:
+        - action: zwave_js.set_config_parameter
+          continue_on_error: true
+          data:
+            parameter: 20
+            value: '{{ cfg_p20 | int }}'
+          target:
+            device_id: '{{ controller_id }}'
+        - delay:
+            milliseconds: 300
+      - *untracked_off
+      - *led_refresh
     - alias: Direct links - write this switch's association group
       if:
       - condition: template
