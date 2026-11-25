@@ -1,5 +1,5 @@
 blueprint:
-  name: Zooz Smart Switch Suite (ZEN71/72/76/77/32/35) v0.6.0
+  name: Zooz Smart Switch Suite (ZEN71/72/76/77/32/35) v0.6.1
   description: 'One blueprint to configure and automate Zooz Z-Wave switches: ZEN71/ZEN76
     (on/off), ZEN72/ZEN77 (dimmers), ZEN32/ZEN35 (scene controllers).
 
@@ -36,7 +36,15 @@ blueprint:
 
 
     Parameter maps verified against the Z-Wave JS device database (zwave-js config
-    files for ZEN71/72/76/77/32/35, Oct 2026). **Version:** 0.6.0
+    files for ZEN71/72/76/77/32/35, Oct 2026). **Version:** 0.6.1
+
+
+    **v0.6.1:** Opposite-state LED color now works on every ZEN7x (parameter 21
+    on ZEN71, 36 on ZEN72, 20 on ZEN76, 37 on ZEN77 - ZEN71/ZEN72 firmware 4.20 and
+    ZEN76 4.10 verified), so a no-load remote can show exactly the same LED colors
+    as the switch it controls. The new default "House default" keeps every existing
+    automation unchanged: White on ZEN77, no change on other models. Pick a color
+    (or Off) explicitly to set it on ZEN71/ZEN72/ZEN76.
 
 
     **v0.6.0:** Direct links (Z-Wave association) - optional. List the lights this
@@ -335,18 +343,21 @@ blueprint:
               custom_value: false
               sort: false
         cfg_opposite_led:
-          name: Opposite-state LED color (ZEN77 only)
-          description: Parameter 37. The LED color shown in the opposite switch state
-            when LED indicator mode is "On when load is off" or "On when load is on"
-            (for example, with "On when load is off" this is the color shown while
-            the load is ON). Off turns that LED off. The ZEN77 has no separate brightness
-            setting for this LED; it follows the LED indicator brightness. Ignored
-            on other models.
-          default: white
+          name: Opposite-state LED color (ZEN7x)
+          description: The LED color shown in the opposite switch state when LED indicator
+            mode is "On when load is off" or "On when load is on" (for example, with
+            "On when load is off" this is the color shown while the load is ON). Off
+            turns that LED off. There is no separate brightness for this LED; it follows
+            the LED indicator brightness. Parameter 21 on ZEN71, 36 on ZEN72, 20 on
+            ZEN76, 37 on ZEN77; ignored on ZEN32/ZEN35. House default (v0.6.1) is White
+            on ZEN77 and no change on other models.
+          default: house
           selector:
             select:
               mode: dropdown
               options:
+              - label: House default (White on ZEN77, no change on others)
+                value: house
               - label: No change
                 value: nc
               - label: 'Off'
@@ -931,6 +942,7 @@ variables:
       power_failure: 8
       smart_mode: 11
       scene_control: 9
+      opposite_led: 21
     zen72:
       orientation: 1
       led_mode: 2
@@ -950,6 +962,7 @@ variables:
       custom_brightness: 18
       local_dimming_speed: 16
       night_light: 22
+      opposite_led: 36
     zen76:
       orientation: 1
       led_mode: 2
@@ -960,6 +973,7 @@ variables:
       power_failure: 8
       smart_mode: 12
       scene_control: 10
+      opposite_led: 20
     zen77:
       orientation: 1
       led_mode: 2
@@ -1066,6 +1080,9 @@ variables:
     blue: 2
     green: 3
     red: 4
+  opposite_raw_in: !input cfg_opposite_led
+  opposite_raw: "{{ ('white' if model_key == 'zen77' else 'nc') if opposite_raw_in
+    == 'house' else opposite_raw_in }}"
   cfg_items:
   - key: orientation
     raw: !input cfg_orientation
@@ -1106,7 +1123,7 @@ variables:
   - key: local_programming
     raw: !input cfg_local_programming
   - key: opposite_led
-    raw: !input cfg_opposite_led
+    raw: '{{ opposite_raw }}'
   step_enable: !input step_enable
   step_style: !input step_style
   step_key_up: !input step_key_up
